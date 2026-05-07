@@ -4437,10 +4437,12 @@ name = "move-bindgen-runtime"
 version = "0.1.0"
 dependencies = [
  "bcs",
+ "iota-sdk-graphql-client",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
  "move-core-types",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

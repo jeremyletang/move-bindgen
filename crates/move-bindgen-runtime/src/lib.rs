@@ -6,12 +6,15 @@
 //!
 //! - [`PtbBuilder`] — a wrapper around `iota-sdk-transaction-builder`'s
 //!   `TransactionBuilder` with caches that turn bare `ObjectId`s into the
-//!   correct `Input` variant at use time.
+//!   correct `Input` variant at use time. With a [`Fetcher`] attached,
+//!   unknown ids are fetched on demand.
 //! - Per-Move-primitive marker traits (`PureBool`, `PureU64`, …) supertyped
 //!   by `PTBArgument`. Generated call builders bound their parameters on
 //!   these so passing the wrong type fails at compile time.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 use serde::{Deserialize, Serialize};
 
@@ -83,7 +86,7 @@ impl MoveType for UID {
 }
 
 // -----------------------------------------------------------------------------
-// PtbBuilder
+// Fetcher
 // -----------------------------------------------------------------------------
 
 /// Cached info for a known shared object.
@@ -93,15 +96,82 @@ pub struct SharedObjectInfo {
     pub mutable: bool,
 }
 
+/// Result of a successful object lookup by a [`Fetcher`].
+#[derive(Clone, Debug)]
+pub enum FetchedObject {
+    Owned(ObjectReference),
+    Shared {
+        initial_shared_version: u64,
+        mutable: bool,
+    },
+}
+
+/// Errors a [`Fetcher`] can return.
+#[derive(Debug, thiserror::Error)]
+pub enum FetchError {
+    #[error("object {0} not found")]
+    NotFound(ObjectId),
+    #[error("fetcher backend: {0}")]
+    Backend(String),
+}
+
+/// Boxed-future return type used by [`Fetcher`] implementations.
+///
+/// This is the manual desugaring of `async fn fetch(...)` and exists so the
+/// trait stays object-safe (so we can store it as `Box<dyn Fetcher>`).
+/// Implementers return `Box::pin(async move { … })`.
+pub type FetchFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<FetchedObject, FetchError>> + Send + 'a>>;
+
+/// Forwarding impl so an `Arc<F: Fetcher>` is itself a `Fetcher`. Lets users
+/// share a single fetcher between the builder and other code paths without
+/// cloning state.
+impl<F: Fetcher + ?Sized> Fetcher for std::sync::Arc<F> {
+    fn fetch<'a>(&'a self, id: ObjectId) -> FetchFuture<'a> {
+        F::fetch(self, id)
+    }
+}
+
+/// Same forwarding for `Box<F>`, in case users want to pass a `Box<dyn Fetcher>`
+/// through `with_fetcher` from a context where they already had it boxed.
+impl<F: Fetcher + ?Sized> Fetcher for Box<F> {
+    fn fetch<'a>(&'a self, id: ObjectId) -> FetchFuture<'a> {
+        F::fetch(self, id)
+    }
+}
+
+/// Pluggable backend the [`PtbBuilder`] consults on cache miss.
+///
+/// ```ignore
+/// struct MyClient { /* … */ }
+///
+/// impl move_bindgen_runtime::Fetcher for MyClient {
+///     fn fetch<'a>(&'a self, id: ObjectId) -> FetchFuture<'a> {
+///         Box::pin(async move {
+///             // …call your client…
+///             Ok(FetchedObject::Shared { initial_shared_version: 1, mutable: true })
+///         })
+///     }
+/// }
+/// ```
+pub trait Fetcher: Send + Sync {
+    fn fetch<'a>(&'a self, id: ObjectId) -> FetchFuture<'a>;
+}
+
+// -----------------------------------------------------------------------------
+// PtbBuilder
+// -----------------------------------------------------------------------------
+
 /// Wrapper around the SDK's `TransactionBuilder` that remembers per-`ObjectId`
-/// ownership info. Once `register_owned` / `register_shared` populate the
-/// cache, generated call builders can accept a bare `ObjectId` and the cache
-/// picks the right `Input` variant.
+/// ownership info, and (optionally) lazily fetches unknown ids via a
+/// [`Fetcher`]. Generated call builders accept bare `ObjectId`s and consult
+/// the cache (then the fetcher) to pick the right `Input` variant.
 pub struct PtbBuilder {
     /// Underlying SDK builder. Public because some advanced flows need to
     /// reach in (for example, calling SDK convenience methods like
     /// `transfer_objects` directly).
     pub inner: TransactionBuilder,
+    fetcher: Option<Box<dyn Fetcher>>,
     owned: HashMap<ObjectId, ObjectReference>,
     shared: HashMap<ObjectId, SharedObjectInfo>,
 }
@@ -110,9 +180,16 @@ impl PtbBuilder {
     pub fn new(sender: Address) -> Self {
         Self {
             inner: TransactionBuilder::new(sender),
+            fetcher: None,
             owned: HashMap::new(),
             shared: HashMap::new(),
         }
+    }
+
+    /// Attach a [`Fetcher`] for on-demand lookup of unknown object ids.
+    pub fn with_fetcher(mut self, f: Box<dyn Fetcher>) -> Self {
+        self.fetcher = Some(f);
+        self
     }
 
     /// Tell the cache that `id` is an owned (or immutable-by-id) object with
@@ -135,11 +212,29 @@ impl PtbBuilder {
         );
     }
 
+    /// Fetch `id` via the attached [`Fetcher`] and register the result. Errors
+    /// if no fetcher is attached or the fetch fails.
+    pub async fn register_from_fetcher(&mut self, id: ObjectId) -> Result<(), FetchError> {
+        let fetched = match self.fetcher.as_deref() {
+            Some(f) => f.fetch(id).await?,
+            None => return Err(FetchError::Backend("no fetcher configured".into())),
+        };
+        match fetched {
+            FetchedObject::Owned(r) => self.register_owned(id, r),
+            FetchedObject::Shared {
+                initial_shared_version,
+                mutable,
+            } => self.register_shared(id, initial_shared_version, mutable),
+        }
+        Ok(())
+    }
+
     /// Cache-aware: picks `ImmutableOrOwned` (cached owned) or `Shared`
-    /// (cached shared); falls back to delegating to the SDK's default
-    /// `PTBArgument` impl for `ObjectId` (which yields a version-less
-    /// `ImmutableOrOwned` requiring a client to resolve at `finish()` time).
-    pub fn resolve_object(&mut self, id: ObjectId) -> Argument {
+    /// (cached shared). On miss, calls the attached [`Fetcher`] (if any),
+    /// caches the result, and returns the corresponding `Argument`. Falls
+    /// back to a bare-id input on miss-with-no-fetcher (which the SDK rejects
+    /// at finish time without a client).
+    pub async fn resolve_object(&mut self, id: ObjectId) -> Argument {
         if let Some(r) = self.owned.get(&id).cloned() {
             return self.inner.input(Input::ImmutableOrOwned(r));
         }
@@ -150,8 +245,40 @@ impl PtbBuilder {
                 mutable: info.mutable,
             }));
         }
-        // Unknown — let the SDK try (will fail at finish() without a client).
-        self.inner.apply_argument(id)
+
+        // Cache miss: try the fetcher, if any.
+        let fetched = match self.fetcher.as_deref() {
+            Some(f) => Some(f.fetch(id).await),
+            None => None,
+        };
+        match fetched {
+            Some(Ok(FetchedObject::Owned(r))) => {
+                self.owned.insert(id, r);
+                self.inner.input(Input::ImmutableOrOwned(r))
+            }
+            Some(Ok(FetchedObject::Shared {
+                initial_shared_version,
+                mutable,
+            })) => {
+                self.shared.insert(
+                    id,
+                    SharedObjectInfo {
+                        initial_shared_version,
+                        mutable,
+                    },
+                );
+                self.inner.input(Input::Shared(SharedObjectReference {
+                    object_id: id,
+                    initial_shared_version: Version::from_u64(initial_shared_version),
+                    mutable,
+                }))
+            }
+            // Fetcher present but fetch failed — fall through to bare id.
+            // Without a fetcher we go straight here. Either way the SDK will
+            // surface a clearer error at finish() time if this id never gets
+            // resolved.
+            _ => self.inner.apply_argument(id),
+        }
     }
 
     /// Build a `MoveCall` command from already-resolved args. Returns the
@@ -178,6 +305,64 @@ impl PtbBuilder {
     pub fn pure<T: serde::Serialize>(&mut self, value: T) -> Argument {
         self.inner.pure(value)
     }
+
+    // ---- Convenience pass-throughs to the inner SDK builder ----------------
+
+    /// Set the gas-coin object refs.
+    pub fn gas(&mut self, refs: impl IntoIterator<Item = ObjectReference>) -> &mut Self {
+        self.inner.gas(refs);
+        self
+    }
+
+    /// Set the gas price (in nanos).
+    pub fn gas_price(&mut self, price: u64) -> &mut Self {
+        self.inner.gas_price(price);
+        self
+    }
+
+    /// Set the gas budget (in nanos).
+    pub fn gas_budget(&mut self, budget: u64) -> &mut Self {
+        self.inner.gas_budget(budget);
+        self
+    }
+
+    /// Convert this builder into a finalised [`Transaction`]. Forwards to the
+    /// SDK's `TransactionBuilder::finish` for the no-client mode.
+    pub fn finish(self) -> Result<Transaction, iota_sdk_transaction_builder::error::Error> {
+        self.inner.finish()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Built-in Fetcher impl for the GraphQL client (feature-gated)
+// -----------------------------------------------------------------------------
+
+#[cfg(feature = "graphql-client")]
+impl Fetcher for iota_sdk_graphql_client::Client {
+    fn fetch<'a>(&'a self, id: ObjectId) -> FetchFuture<'a> {
+        Box::pin(async move {
+            let obj = self
+                .object(id, None)
+                .await
+                .map_err(|e| FetchError::Backend(e.to_string()))?
+                .ok_or(FetchError::NotFound(id))?;
+            match obj.owner() {
+                iota_sdk_types::Owner::Shared(initial_shared_version) => {
+                    Ok(FetchedObject::Shared {
+                        initial_shared_version: initial_shared_version.as_u64(),
+                        // Default to mutable — the safer choice for entry
+                        // points that take `&mut`. Pre-`register_shared` if
+                        // you need it immutable.
+                        mutable: true,
+                    })
+                }
+                iota_sdk_types::Owner::Address(_)
+                | iota_sdk_types::Owner::Object(_)
+                | iota_sdk_types::Owner::Immutable => Ok(FetchedObject::Owned(obj.object_ref())),
+                other => Err(FetchError::Backend(format!("unknown owner: {other:?}"))),
+            }
+        })
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -185,16 +370,15 @@ impl PtbBuilder {
 // -----------------------------------------------------------------------------
 //
 // Each trait is a closed-impl set bounded by `PTBArgument`. The single method
-// `into_argument(self, b)` is what generated call builders invoke. The default
-// body delegates to `PTBArgument::arg` via the SDK's `apply_argument`.
-//
-// Cache-aware override happens *only* on `ArgumentCounter for ObjectId` (and
-// the analogous codegen'd traits) — primitives have no cache need.
+// `into_argument(self, b)` is async because for object-shaped inputs the
+// implementation may need to hit a [`Fetcher`]; primitive impls don't await
+// anything, but the async-fn signature is uniform across markers.
 
 macro_rules! decl_pure_trait {
     ($trait_name:ident, $ty:ty) => {
         pub trait $trait_name: PTBArgument {
-            fn into_argument(self, b: &mut PtbBuilder) -> Argument
+            #[allow(async_fn_in_trait)] // the trait is consumed by async generated fns; not used as `dyn`
+            async fn into_argument(self, b: &mut PtbBuilder) -> Argument
             where
                 Self: Sized,
             {
@@ -218,7 +402,8 @@ decl_pure_trait!(PureString, String);
 /// Generic marker for `vector<T>` — closed to `Vec<T>` (where T:MoveArg) and
 /// `Argument`.
 pub trait PureVec<T>: PTBArgument {
-    fn into_argument(self, b: &mut PtbBuilder) -> Argument
+    #[allow(async_fn_in_trait)]
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument
     where
         Self: Sized,
     {
@@ -231,7 +416,8 @@ impl<T> PureVec<T> for Argument {}
 /// Generic marker for `Option<T>` — closed to `Option<T>` (where T:MoveArg)
 /// and `Argument`.
 pub trait PureOption<T>: PTBArgument {
-    fn into_argument(self, b: &mut PtbBuilder) -> Argument
+    #[allow(async_fn_in_trait)]
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument
     where
         Self: Sized,
     {

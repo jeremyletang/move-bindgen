@@ -220,17 +220,21 @@ fn argument_trait(type_name: &Identifier, g: &Generics, abilities: AbilitySet) -
 
     if abilities.has_key() {
         // Object trait. The default `into_argument` body delegates to the
-        // SDK; the `ObjectId` impl overrides it for cache-aware resolution.
+        // SDK; the `ObjectId` impl overrides it for cache-aware resolution
+        // (with optional Fetcher fallback for unknown ids).
         quote! {
             pub trait #trait_name #decl: PTBArgument {
-                fn into_argument(self, b: &mut PtbBuilder) -> Argument {
+                #[allow(async_fn_in_trait)]
+                async fn into_argument(self, b: &mut PtbBuilder) -> Argument
+                where Self: Sized,
+                {
                     b.inner.apply_argument(self)
                 }
             }
             impl #decl #trait_name #args for Argument {}
             impl #decl #trait_name #args for ObjectId {
-                fn into_argument(self, b: &mut PtbBuilder) -> Argument {
-                    b.resolve_object(self)
+                async fn into_argument(self, b: &mut PtbBuilder) -> Argument {
+                    b.resolve_object(self).await
                 }
             }
             impl #decl #trait_name #args for ObjectReference {}
@@ -267,7 +271,10 @@ fn argument_trait(type_name: &Identifier, g: &Generics, abilities: AbilitySet) -
             }
 
             pub trait #trait_name #decl: PTBArgument {
-                fn into_argument(self, b: &mut PtbBuilder) -> Argument {
+                #[allow(async_fn_in_trait)]
+                async fn into_argument(self, b: &mut PtbBuilder) -> Argument
+                where Self: Sized,
+                {
                     b.inner.apply_argument(self)
                 }
             }

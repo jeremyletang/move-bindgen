@@ -77,7 +77,7 @@ fn emit_function(
         let aname = format_ident!("a{arg_idx}");
         params_decl.extend(quote! { , #pname: #bound });
         arg_exprs.push(quote! {
-            let #aname = #pname.into_argument(b);
+            let #aname = #pname.into_argument(b).await;
         });
         arg_idx += 1;
     }
@@ -88,7 +88,7 @@ fn emit_function(
     let fn_ident = safe_ident(name.as_str());
 
     Ok(quote! {
-        pub fn #fn_ident #generics_decl (
+        pub async fn #fn_ident #generics_decl (
             b: &mut PtbBuilder
             #params_decl
         ) -> Argument {

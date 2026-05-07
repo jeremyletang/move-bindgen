@@ -21,8 +21,8 @@ fn fake_object_ref(byte: u8) -> ObjectReference {
     }
 }
 
-#[test]
-fn increment_call_finalizes_into_a_well_formed_ptb() {
+#[tokio::test]
+async fn increment_call_finalizes_into_a_well_formed_ptb() {
     let sender = Address::ZERO;
     let mut ptb = PtbBuilder::new(sender);
 
@@ -33,9 +33,9 @@ fn increment_call_finalizes_into_a_well_formed_ptb() {
     ptb.register_owned(admin_id, fake_object_ref(0xAD));
 
     // Build three calls — bare ObjectIds + a Pure u64.
-    counter::increment(&mut ptb, counter_id, 5_u64);
-    counter::value(&mut ptb, counter_id);
-    counter::reset(&mut ptb, admin_id, counter_id);
+    counter::increment(&mut ptb, counter_id, 5_u64).await;
+    counter::value(&mut ptb, counter_id).await;
+    counter::reset(&mut ptb, admin_id, counter_id).await;
 
     // Gas setup so finish() succeeds.
     ptb.inner.gas_price(1_000);
