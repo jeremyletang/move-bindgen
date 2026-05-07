@@ -32,6 +32,10 @@ move-core-types         = { git = "https://github.com/iotaledger/iota.git", rev 
 move-package            = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-symbol-pool        = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 
+# Sibling SDK — canonical client-side surface (PTB types + builder).
+iota-sdk-types               = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
+iota-sdk-transaction-builder = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
+
 # Local-dev override: uncomment to point all iota git deps at a sibling checkout.
 # [patch."https://github.com/iotaledger/iota.git"]
 # iota-move-build         = { path = "../iota/crates/iota-move-build" }
@@ -41,6 +45,9 @@ move-symbol-pool        = { git = "https://github.com/iotaledger/iota.git", rev 
 # move-core-types         = { path = "../iota/external-crates/move/crates/move-core-types" }
 # move-package            = { path = "../iota/external-crates/move/crates/move-package" }
 # move-symbol-pool        = { path = "../iota/external-crates/move/crates/move-symbol-pool" }
+# [patch."https://github.com/iotaledger/iota-rust-sdk.git"]
+# iota-sdk-types               = { path = "../iota-rust-sdk/crates/iota-sdk-types" }
+# iota-sdk-transaction-builder = { path = "../iota-rust-sdk/crates/iota-sdk-transaction-builder" }
 
 # Codegen
 syn          = { version = "2", features = ["full"] }

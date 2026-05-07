@@ -46,7 +46,7 @@ pub fn rust_type(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
         Type::U64 => quote!(u64),
         Type::U128 => quote!(u128),
         Type::U256 => bail!("u256 not yet supported in generated code"),
-        Type::Address => quote!(AccountAddress),
+        Type::Address => quote!(Address),
         Type::Signer => bail!("`signer` is not supported on IOTA"),
         Type::Vector(inner) => {
             let inner = rust_type(inner, ctx)?;

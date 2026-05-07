@@ -1,28 +1,21 @@
 //! Runtime support consumed by `move-bindgen`-generated code.
 //!
-//! Re-exports the small set of types generated code needs (so the user's
-//! crate doesn't have to depend on `move-core-types` directly), defines the
-//! `MoveType` trait, and provides impls for primitives and the well-known
-//! framework types `UID` / `ID`.
+//! Re-exports the small set of SDK types generated code needs (so the user's
+//! crate doesn't have to depend on `iota-sdk-types` directly), and defines
+//! the well-known framework types `UID` / `ID`.
 
 use serde::{Deserialize, Serialize};
 
-pub use move_core_types::{
-    account_address::AccountAddress,
-    language_storage::{StructTag, TypeTag},
+pub use iota_sdk_transaction_builder::{
+    PureBytes,
+    types::{MoveArg, MoveType},
 };
-
-/// Implemented by every Move type that can be referenced in a generated
-/// signature. Used at call-time to fill in the type-argument slots of a
-/// `MoveCall`.
-pub trait MoveType {
-    fn type_tag() -> TypeTag;
-}
+pub use iota_sdk_types::{Address, Identifier, ObjectId, StructTag, TypeTag};
 
 /// `iota::object::ID` — a 32-byte address wrapped in a struct.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ID {
-    pub bytes: AccountAddress,
+    pub bytes: Address,
 }
 
 /// `iota::object::UID` — owns a single `ID`.
@@ -31,79 +24,24 @@ pub struct UID {
     pub id: ID,
 }
 
-const IOTA_FRAMEWORK_ADDRESS: AccountAddress = {
-    let mut bytes = [0u8; AccountAddress::LENGTH];
-    bytes[AccountAddress::LENGTH - 1] = 0x02;
-    AccountAddress::new(bytes)
-};
-
-const STD_FRAMEWORK_ADDRESS: AccountAddress = {
-    let mut bytes = [0u8; AccountAddress::LENGTH];
-    bytes[AccountAddress::LENGTH - 1] = 0x01;
-    AccountAddress::new(bytes)
+const IOTA_FRAMEWORK_ADDRESS: Address = {
+    let mut bytes = [0u8; 32];
+    bytes[31] = 0x02;
+    Address::new(bytes)
 };
 
 /// Build a `TypeTag::Struct` from string module/name + concrete type params.
 ///
-/// `module` and `name` are panic-on-invalid-Move-identifier; this is fine
-/// because every caller is generated code that bakes in identifiers it just
-/// extracted from compiled Move bytecode.
-pub fn make_struct_tag(
-    addr: AccountAddress,
-    module: &str,
-    name: &str,
-    params: Vec<TypeTag>,
-) -> TypeTag {
-    use move_core_types::identifier::Identifier;
-    TypeTag::Struct(Box::new(StructTag {
-        address: addr,
-        module: Identifier::new(module).expect("static module name is a valid Move identifier"),
-        name: Identifier::new(name).expect("static type name is a valid Move identifier"),
-        type_params: params,
-    }))
-}
-
-macro_rules! impl_move_type_primitive {
-    ($($t:ty => $tag:expr),* $(,)?) => {
-        $(
-            impl MoveType for $t {
-                fn type_tag() -> TypeTag { $tag }
-            }
-        )*
-    };
-}
-
-impl_move_type_primitive! {
-    bool            => TypeTag::Bool,
-    u8              => TypeTag::U8,
-    u16             => TypeTag::U16,
-    u32             => TypeTag::U32,
-    u64             => TypeTag::U64,
-    u128            => TypeTag::U128,
-    AccountAddress  => TypeTag::Address,
-}
-
-impl<T: MoveType> MoveType for Vec<T> {
-    fn type_tag() -> TypeTag {
-        TypeTag::Vector(Box::new(T::type_tag()))
-    }
-}
-
-impl<T: MoveType> MoveType for Option<T> {
-    fn type_tag() -> TypeTag {
-        make_struct_tag(
-            STD_FRAMEWORK_ADDRESS,
-            "option",
-            "Option",
-            vec![T::type_tag()],
-        )
-    }
-}
-
-impl MoveType for String {
-    fn type_tag() -> TypeTag {
-        make_struct_tag(STD_FRAMEWORK_ADDRESS, "string", "String", vec![])
-    }
+/// Panics if `module` or `name` aren't valid Move identifiers — fine because
+/// every caller is generated code baking in identifiers extracted from
+/// already-compiled bytecode.
+pub fn make_struct_tag(addr: Address, module: &str, name: &str, params: Vec<TypeTag>) -> TypeTag {
+    TypeTag::Struct(Box::new(StructTag::new(
+        addr,
+        Identifier::new(module).expect("static module name is a valid Move identifier"),
+        Identifier::new(name).expect("static type name is a valid Move identifier"),
+        params,
+    )))
 }
 
 impl MoveType for ID {
