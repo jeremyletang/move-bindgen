@@ -43,7 +43,17 @@ const STD_FRAMEWORK_ADDRESS: AccountAddress = {
     AccountAddress::new(bytes)
 };
 
-fn struct_tag(addr: AccountAddress, module: &str, name: &str, params: Vec<TypeTag>) -> TypeTag {
+/// Build a `TypeTag::Struct` from string module/name + concrete type params.
+///
+/// `module` and `name` are panic-on-invalid-Move-identifier; this is fine
+/// because every caller is generated code that bakes in identifiers it just
+/// extracted from compiled Move bytecode.
+pub fn make_struct_tag(
+    addr: AccountAddress,
+    module: &str,
+    name: &str,
+    params: Vec<TypeTag>,
+) -> TypeTag {
     use move_core_types::identifier::Identifier;
     TypeTag::Struct(Box::new(StructTag {
         address: addr,
@@ -81,7 +91,7 @@ impl<T: MoveType> MoveType for Vec<T> {
 
 impl<T: MoveType> MoveType for Option<T> {
     fn type_tag() -> TypeTag {
-        struct_tag(
+        make_struct_tag(
             STD_FRAMEWORK_ADDRESS,
             "option",
             "Option",
@@ -92,18 +102,18 @@ impl<T: MoveType> MoveType for Option<T> {
 
 impl MoveType for String {
     fn type_tag() -> TypeTag {
-        struct_tag(STD_FRAMEWORK_ADDRESS, "string", "String", vec![])
+        make_struct_tag(STD_FRAMEWORK_ADDRESS, "string", "String", vec![])
     }
 }
 
 impl MoveType for ID {
     fn type_tag() -> TypeTag {
-        struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "ID", vec![])
+        make_struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "ID", vec![])
     }
 }
 
 impl MoveType for UID {
     fn type_tag() -> TypeTag {
-        struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "UID", vec![])
+        make_struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "UID", vec![])
     }
 }

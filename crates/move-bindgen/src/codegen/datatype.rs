@@ -48,7 +48,7 @@ fn emit_struct(
             let tn = format_ident!("T{}", i);
             field_tokens.extend(quote! {
                 #[serde(skip)]
-                pub #pf: ::std::marker::PhantomData<#tn>,
+                pub #pf: PhantomData<#tn>,
             });
         }
     }
@@ -57,7 +57,7 @@ fn emit_struct(
 
     let decl = &g.decl;
     Ok(quote! {
-        #[derive(::std::clone::Clone, ::std::fmt::Debug, ::serde::Serialize, ::serde::Deserialize)]
+        #[derive(Clone, Debug, Serialize, Deserialize)]
         pub struct #name #decl {
             #field_tokens
         }
@@ -113,7 +113,7 @@ fn emit_enum(
             let tn = format_ident!("T{}", i);
             variants.extend(quote! {
                 #[serde(skip)]
-                #vn(::std::marker::PhantomData<#tn>),
+                #vn(PhantomData<#tn>),
             });
         }
     }
@@ -121,7 +121,7 @@ fn emit_enum(
     let move_type = move_type_impl(&e.name, module, &g);
     let decl = &g.decl;
     Ok(quote! {
-        #[derive(::std::clone::Clone, ::std::fmt::Debug, ::serde::Serialize, ::serde::Deserialize)]
+        #[derive(Clone, Debug, Serialize, Deserialize)]
         pub enum #name #decl {
             #variants
         }
@@ -153,11 +153,7 @@ fn generics(phantoms: &[bool]) -> Generics {
     let names: Vec<Ident> = (0..phantoms.len())
         .map(|i| format_ident!("T{}", i))
         .collect();
-    let bounded = names.iter().map(|n| {
-        quote! {
-            #n: ::move_bindgen_runtime::MoveType
-        }
-    });
+    let bounded = names.iter().map(|n| quote! { #n: MoveType });
     Generics {
         decl: quote!(< #( #bounded ),* >),
         args: quote!(< #( #names ),* >),
@@ -175,30 +171,21 @@ fn move_type_impl(
     let type_name_s = type_name.as_str();
 
     let type_params = if g.names.is_empty() {
-        quote!(::std::vec::Vec::new())
+        quote!(Vec::new())
     } else {
         let parts = g
             .names
             .iter()
-            .map(|n| quote! { <#n as ::move_bindgen_runtime::MoveType>::type_tag() });
-        quote!(::std::vec![ #( #parts ),* ])
+            .map(|n| quote! { <#n as MoveType>::type_tag() });
+        quote!(vec![ #( #parts ),* ])
     };
 
     let decl = &g.decl;
     let args = &g.args;
     quote! {
-        impl #decl ::move_bindgen_runtime::MoveType for #name #args {
-            fn type_tag() -> ::move_bindgen_runtime::TypeTag {
-                ::move_bindgen_runtime::TypeTag::Struct(::std::boxed::Box::new(
-                    ::move_bindgen_runtime::StructTag {
-                        address: super::PACKAGE_ID,
-                        module: ::move_core_types::identifier::Identifier::new(#module_name)
-                            .expect("static module name is a valid Move identifier"),
-                        name: ::move_core_types::identifier::Identifier::new(#type_name_s)
-                            .expect("static type name is a valid Move identifier"),
-                        type_params: #type_params,
-                    }
-                ))
+        impl #decl MoveType for #name #args {
+            fn type_tag() -> TypeTag {
+                make_struct_tag(super::PACKAGE_ID, #module_name, #type_name_s, #type_params)
             }
         }
     }

@@ -22,13 +22,21 @@ enum Cmd {
         /// Path to the Move package (directory containing `Move.toml`).
         package: PathBuf,
     },
-    /// Build the package and write Rust bindings to `--out`.
+    /// Build the package and write a complete Rust bindings crate.
+    ///
+    /// Output is a directory containing `Cargo.toml`, `src/lib.rs`, and one
+    /// `src/<module>.rs` per Move module that has datatypes. Defaults to
+    /// `<package>-rs` next to the Move package directory.
     Generate {
         /// Path to the Move package (directory containing `Move.toml`).
         package: PathBuf,
-        /// Path of the file to write the generated Rust source to.
+        /// Output directory. Defaults to `<package>-rs` sibling to `package`.
         #[arg(long, short = 'o')]
-        out: PathBuf,
+        out: Option<PathBuf>,
+        /// Path-dependency to use for `move-bindgen-runtime` in the
+        /// generated `Cargo.toml`. Default targets the in-tree runtime.
+        #[arg(long, default_value = "../../crates/move-bindgen-runtime")]
+        runtime_path: String,
     },
 }
 
@@ -39,12 +47,34 @@ fn main() -> anyhow::Result<()> {
             let bindings = move_bindgen::load_package(&package)?;
             print_dump(&bindings);
         }
-        Cmd::Generate { package, out } => {
+        Cmd::Generate {
+            package,
+            out,
+            runtime_path,
+        } => {
             let bindings = move_bindgen::load_package(&package)?;
-            let source = move_bindgen::generate(&bindings)?;
-            std::fs::write(&out, source)?;
-            eprintln!("wrote {}", out.display());
+            let opts = move_bindgen::GenerateOptions { runtime_path };
+            let crate_ = move_bindgen::generate(&bindings, &opts)?;
+            let out_dir = out.unwrap_or_else(|| default_out_dir(&package, &crate_.crate_name));
+            write_crate(&out_dir, &crate_)?;
+            eprintln!("wrote crate to {}", out_dir.display());
         }
+    }
+    Ok(())
+}
+
+fn default_out_dir(package: &std::path::Path, crate_name: &str) -> PathBuf {
+    let parent = package.parent().unwrap_or_else(|| std::path::Path::new("."));
+    parent.join(crate_name)
+}
+
+fn write_crate(out_dir: &std::path::Path, c: &move_bindgen::GeneratedCrate) -> anyhow::Result<()> {
+    let src_dir = out_dir.join("src");
+    std::fs::create_dir_all(&src_dir)?;
+    std::fs::write(out_dir.join("Cargo.toml"), &c.cargo_toml)?;
+    std::fs::write(src_dir.join("lib.rs"), &c.lib_rs)?;
+    for (name, body) in &c.module_files {
+        std::fs::write(src_dir.join(name), body)?;
     }
     Ok(())
 }

@@ -74,6 +74,11 @@ jobs:
       - name: Smoke-test — dump example package IR
         run: ./target/debug/move-bindgen dump examples/counter
 
+      - name: Smoke-test — generate bindings crate and build it
+        run: |
+          ./target/debug/move-bindgen generate examples/counter
+          cd examples/counter-rs && cargo build --locked
+
       - name: sccache stats (after build)
         run: sccache --show-stats
 

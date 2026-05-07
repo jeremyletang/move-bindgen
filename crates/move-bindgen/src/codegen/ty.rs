@@ -33,6 +33,10 @@ pub struct TypeCtx<'a> {
 }
 
 /// Resolve a Move type to the Rust tokens for the type position.
+///
+/// Generated modules `use move_bindgen_runtime::*;` and `use serde::{...};` at
+/// the top, so we emit short names here (`UID`, `Vec<T>`, …) rather than fully
+/// qualified paths.
 pub fn rust_type(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
     Ok(match ty {
         Type::Bool => quote!(bool),
@@ -42,11 +46,11 @@ pub fn rust_type(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
         Type::U64 => quote!(u64),
         Type::U128 => quote!(u128),
         Type::U256 => bail!("u256 not yet supported in generated code"),
-        Type::Address => quote!(::move_bindgen_runtime::AccountAddress),
+        Type::Address => quote!(AccountAddress),
         Type::Signer => bail!("`signer` is not supported on IOTA"),
         Type::Vector(inner) => {
             let inner = rust_type(inner, ctx)?;
-            quote!(::std::vec::Vec<#inner>)
+            quote!(Vec<#inner>)
         }
         Type::TypeParameter(idx) => {
             let ident = format_ident!("T{}", *idx);
@@ -74,11 +78,11 @@ fn rust_datatype(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
         quote!(< #( #args ),* >)
     };
 
-    // Well-known framework types that map to runtime/Rust counterparts.
+    // Well-known framework types — short names from the runtime wildcard import.
     if module_addr == IOTA_ADDRESS && module_name == "object" {
         match type_name {
-            "UID" => return Ok(quote!(::move_bindgen_runtime::UID)),
-            "ID" => return Ok(quote!(::move_bindgen_runtime::ID)),
+            "UID" => return Ok(quote!(UID)),
+            "ID" => return Ok(quote!(ID)),
             _ => {}
         }
     }
@@ -86,10 +90,10 @@ fn rust_datatype(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
         match (module_name, type_name) {
             ("option", "Option") => {
                 let arg = args.into_iter().next().unwrap_or_else(|| quote!(()));
-                return Ok(quote!(::std::option::Option<#arg>));
+                return Ok(quote!(Option<#arg>));
             }
             ("string", "String") | ("ascii", "String") => {
-                return Ok(quote!(::std::string::String));
+                return Ok(quote!(String));
             }
             _ => {}
         }
@@ -116,29 +120,28 @@ fn rust_datatype(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
 /// Returns the `TypeTag`-building expression as a token stream.
 #[allow(dead_code)] // wired up by the call-codegen phase
 pub fn type_tag_expr(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
-    let rt = quote!(::move_bindgen_runtime);
     Ok(match ty {
-        Type::Bool => quote!(#rt::TypeTag::Bool),
-        Type::U8 => quote!(#rt::TypeTag::U8),
-        Type::U16 => quote!(#rt::TypeTag::U16),
-        Type::U32 => quote!(#rt::TypeTag::U32),
-        Type::U64 => quote!(#rt::TypeTag::U64),
-        Type::U128 => quote!(#rt::TypeTag::U128),
+        Type::Bool => quote!(TypeTag::Bool),
+        Type::U8 => quote!(TypeTag::U8),
+        Type::U16 => quote!(TypeTag::U16),
+        Type::U32 => quote!(TypeTag::U32),
+        Type::U64 => quote!(TypeTag::U64),
+        Type::U128 => quote!(TypeTag::U128),
         Type::U256 => bail!("u256 not yet supported"),
-        Type::Address => quote!(#rt::TypeTag::Address),
+        Type::Address => quote!(TypeTag::Address),
         Type::Signer => bail!("`signer` is not supported on IOTA"),
         Type::Vector(inner) => {
             let inner = type_tag_expr(inner, ctx)?;
-            quote!(#rt::TypeTag::Vector(::std::boxed::Box::new(#inner)))
+            quote!(TypeTag::Vector(Box::new(#inner)))
         }
         Type::TypeParameter(idx) => {
             let ident = format_ident!("T{}", *idx);
-            quote!(<#ident as #rt::MoveType>::type_tag())
+            quote!(<#ident as MoveType>::type_tag())
         }
         Type::Reference(_, _) => bail!("references have no TypeTag"),
         Type::Datatype(_) => {
             let rust = rust_type(ty, ctx)?;
-            quote!(<#rust as #rt::MoveType>::type_tag())
+            quote!(<#rust as MoveType>::type_tag())
         }
     })
 }

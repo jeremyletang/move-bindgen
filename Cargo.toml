@@ -4,7 +4,6 @@ members = [
     "crates/move-bindgen",
     "crates/move-bindgen-cli",
     "crates/move-bindgen-runtime",
-    "examples/counter-bindings",
 ]
 
 [workspace.package]
