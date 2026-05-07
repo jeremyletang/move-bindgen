@@ -1239,6 +1239,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "counter-bindings"
+version = "0.1.0"
+dependencies = [
+ "move-bindgen-runtime",
+ "move-core-types",
+ "serde",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4099,6 +4108,10 @@ dependencies = [
  "move-core-types",
  "move-package",
  "move-symbol-pool",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
  "thiserror 2.0.18",
 ]
 
@@ -4115,6 +4128,11 @@ dependencies = [
 [[package]]
 name = "move-bindgen-runtime"
 version = "0.1.0"
+dependencies = [
+ "bcs",
+ "move-core-types",
+ "serde",
+]
 
 [[package]]
 name = "move-borrow-graph"

@@ -22,6 +22,14 @@ enum Cmd {
         /// Path to the Move package (directory containing `Move.toml`).
         package: PathBuf,
     },
+    /// Build the package and write Rust bindings to `--out`.
+    Generate {
+        /// Path to the Move package (directory containing `Move.toml`).
+        package: PathBuf,
+        /// Path of the file to write the generated Rust source to.
+        #[arg(long, short = 'o')]
+        out: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -30,6 +38,12 @@ fn main() -> anyhow::Result<()> {
         Cmd::Dump { package } => {
             let bindings = move_bindgen::load_package(&package)?;
             print_dump(&bindings);
+        }
+        Cmd::Generate { package, out } => {
+            let bindings = move_bindgen::load_package(&package)?;
+            let source = move_bindgen::generate(&bindings)?;
+            std::fs::write(&out, source)?;
+            eprintln!("wrote {}", out.display());
         }
     }
     Ok(())
