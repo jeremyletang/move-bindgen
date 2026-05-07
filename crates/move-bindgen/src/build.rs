@@ -37,9 +37,10 @@ impl Default for BuildOptions {
 pub(crate) fn build_package(path: &Path, opts: &BuildOptions) -> Result<CompiledPackage> {
     move_package::package_hooks::register_package_hooks(Box::new(IotaPackageHooks));
 
-    let mut config = MoveBuildConfig::default();
-    config.implicit_dependencies =
-        iota_move_build::implicit_deps(latest_system_packages());
+    let config = MoveBuildConfig {
+        implicit_dependencies: iota_move_build::implicit_deps(latest_system_packages()),
+        ..Default::default()
+    };
 
     IotaBuildConfig {
         config,

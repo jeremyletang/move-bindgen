@@ -1,11 +1,15 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use move_bindgen::Bindings;
 use move_binary_format::file_format::Visibility;
+use move_bindgen::Bindings;
 
 #[derive(Parser, Debug)]
-#[command(name = "move-bindgen", version, about = "Generate Rust bindings from a Move package")]
+#[command(
+    name = "move-bindgen",
+    version,
+    about = "Generate Rust bindings from a Move package"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -71,8 +75,11 @@ fn print_dump(b: &Bindings) {
                     fmt_type_params(&e.type_parameters),
                 );
                 for v in &e.variants {
-                    let fields: Vec<String> =
-                        v.fields.iter().map(|f| format!("{}: {}", f.name, f.type_)).collect();
+                    let fields: Vec<String> = v
+                        .fields
+                        .iter()
+                        .map(|f| format!("{}: {}", f.name, f.type_))
+                        .collect();
                     println!("      {}({})", v.name, fields.join(", "));
                 }
             }
@@ -119,11 +126,23 @@ fn print_dump(b: &Bindings) {
 
 fn abilities_str(a: move_binary_format::file_format::AbilitySet) -> String {
     let mut out = Vec::new();
-    if a.has_copy()  { out.push("copy");  }
-    if a.has_drop()  { out.push("drop");  }
-    if a.has_store() { out.push("store"); }
-    if a.has_key()   { out.push("key");   }
-    if out.is_empty() { "[]".into() } else { format!("[{}]", out.join(", ")) }
+    if a.has_copy() {
+        out.push("copy");
+    }
+    if a.has_drop() {
+        out.push("drop");
+    }
+    if a.has_store() {
+        out.push("store");
+    }
+    if a.has_key() {
+        out.push("key");
+    }
+    if out.is_empty() {
+        "[]".into()
+    } else {
+        format!("[{}]", out.join(", "))
+    }
 }
 
 fn fmt_type_params(ps: &[move_binary_format::file_format::DatatypeTyParameter]) -> String {
