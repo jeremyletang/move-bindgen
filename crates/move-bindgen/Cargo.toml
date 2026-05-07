@@ -18,5 +18,11 @@ move-core-types.workspace         = true
 move-package.workspace            = true
 move-symbol-pool.workspace        = true
 
+# Codegen
+proc-macro2.workspace  = true
+quote.workspace        = true
+syn.workspace          = true
+prettyplease.workspace = true
+
 [lints]
 workspace = true

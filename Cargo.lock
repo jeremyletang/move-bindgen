@@ -4099,6 +4099,10 @@ dependencies = [
  "move-core-types",
  "move-package",
  "move-symbol-pool",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
  "thiserror 2.0.18",
 ]
 
@@ -4115,6 +4119,11 @@ dependencies = [
 [[package]]
 name = "move-bindgen-runtime"
 version = "0.1.0"
+dependencies = [
+ "bcs",
+ "move-core-types",
+ "serde",
+]
 
 [[package]]
 name = "move-borrow-graph"

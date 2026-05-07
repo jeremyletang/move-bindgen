@@ -18,6 +18,10 @@ repository = "https://github.com/jeremyletang/move-bindgen"
 move-bindgen = { path = "crates/move-bindgen" }
 move-bindgen-runtime = { path = "crates/move-bindgen-runtime" }
 
+# Used by both the runtime and generated code
+serde = { version = "1", features = ["derive"] }
+bcs   = "0.1"
+
 # IOTA build chain — pinned git deps to the iota monorepo.
 # Bump `IOTA_REV` together below when you want to update.
 iota-move-build         = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }

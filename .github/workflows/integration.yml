@@ -74,6 +74,15 @@ jobs:
       - name: Smoke-test — dump example package IR
         run: ./target/debug/move-bindgen dump examples/counter
 
+      - name: Smoke-test — generate bindings crate and check it
+        # `cargo check` is enough: we just need to confirm the generated
+        # source type-checks against the current runtime. No `--locked`
+        # because the crate is regenerated each run with no committed
+        # `Cargo.lock` to lock against.
+        run: |
+          ./target/debug/move-bindgen generate examples/counter
+          cd examples/counter-rs && cargo check
+
       - name: sccache stats (after build)
         run: sccache --show-stats
 
