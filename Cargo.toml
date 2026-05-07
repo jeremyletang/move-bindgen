@@ -10,7 +10,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-authors = ["jeremy <jeremy@real.xyz>"]
+authors = ["jeremy <me@jeremyletang.com>"]
 repository = "https://github.com/jeremyletang/move-bindgen"
 
 [workspace.dependencies]
