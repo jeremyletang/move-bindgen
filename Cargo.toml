@@ -1,0 +1,56 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/move-bindgen",
+    "crates/move-bindgen-cli",
+    "crates/move-bindgen-runtime",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["jeremy <jeremy@real.xyz>"]
+repository = "https://github.com/jeremyletang/move-bindgen"
+
+[workspace.dependencies]
+# Internal crates
+move-bindgen = { path = "crates/move-bindgen" }
+move-bindgen-runtime = { path = "crates/move-bindgen-runtime" }
+
+# IOTA build chain — pinned git deps to the iota monorepo.
+# Bump `IOTA_REV` together below when you want to update.
+iota-move-build         = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+iota-package-management = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-binary-format      = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-bytecode-utils     = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-core-types         = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-package            = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-symbol-pool        = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+
+# Local-dev override: uncomment to point all iota git deps at a sibling checkout.
+# [patch."https://github.com/iotaledger/iota.git"]
+# iota-move-build         = { path = "../iota/crates/iota-move-build" }
+# iota-package-management = { path = "../iota/crates/iota-package-management" }
+# move-binary-format      = { path = "../iota/external-crates/move/crates/move-binary-format" }
+# move-bytecode-utils     = { path = "../iota/external-crates/move/crates/move-bytecode-utils" }
+# move-core-types         = { path = "../iota/external-crates/move/crates/move-core-types" }
+# move-package            = { path = "../iota/external-crates/move/crates/move-package" }
+# move-symbol-pool        = { path = "../iota/external-crates/move/crates/move-symbol-pool" }
+
+# Codegen
+syn          = { version = "2", features = ["full"] }
+quote        = "1"
+proc-macro2  = "1"
+prettyplease = "0.2"
+
+# Common
+anyhow    = "1"
+thiserror = "2"
+clap      = { version = "4", features = ["derive"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

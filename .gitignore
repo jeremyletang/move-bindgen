@@ -1,0 +1,15 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Move
+build/
+Move.lock
+.trace
+.coverage_map.mvcov
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

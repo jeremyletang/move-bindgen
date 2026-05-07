@@ -1,0 +1,21 @@
+[package]
+name = "move-bindgen-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "CLI for move-bindgen"
+
+[[bin]]
+name = "move-bindgen"
+path = "src/main.rs"
+
+[dependencies]
+move-bindgen.workspace      = true
+move-binary-format.workspace = true
+anyhow.workspace            = true
+clap.workspace              = true
+
+[lints]
+workspace = true

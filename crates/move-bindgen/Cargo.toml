@@ -1,0 +1,22 @@
+[package]
+name = "move-bindgen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Generate Rust bindings (types + PTB call builders + dev-inspect views) from Move source packages"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+
+iota-move-build.workspace         = true
+iota-package-management.workspace = true
+move-binary-format.workspace      = true
+move-core-types.workspace         = true
+move-package.workspace            = true
+move-symbol-pool.workspace        = true
+
+[lints]
+workspace = true
