@@ -1,6 +1,7 @@
 //! Bindings → a complete generated Rust crate.
 
 mod datatype;
+mod function;
 mod ty;
 
 use anyhow::{Context, Result};
@@ -62,8 +63,12 @@ pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<Generated
             package_addr,
             current_module: &m.id.name,
         };
-        let body = datatype::emit_datatypes(m, &ctx)
-            .with_context(|| format!("codegen for module {}", m.id.name))?;
+        let mut body = datatype::emit_datatypes(m, &ctx)
+            .with_context(|| format!("datatype codegen for module {}", m.id.name))?;
+        body.extend(
+            function::emit_functions(m, &ctx)
+                .with_context(|| format!("function codegen for module {}", m.id.name))?,
+        );
         if body.is_empty() {
             continue;
         }
@@ -139,6 +144,7 @@ fn render_cargo_toml(crate_name: &str, package_name: &str, runtime_path: &str) -
          [dependencies]\n\
          move-bindgen-runtime = {{ path = \"{runtime_path}\" }}\n\
          serde = {{ version = \"1\", features = [\"derive\"] }}\n\
+         bcs   = \"0.1\"\n\
          \n\
          # Detach this crate from any parent workspace it might be generated inside.\n\
          [workspace]\n",

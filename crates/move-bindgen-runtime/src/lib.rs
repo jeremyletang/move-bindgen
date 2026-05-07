@@ -16,13 +16,18 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 pub use iota_sdk_transaction_builder::{
-    PTBArgument, PureBytes, Receiving, Shared, SharedMut, TransactionBuilder,
     types::{MoveArg, MoveType},
     // `Argument`, `Command`, `MoveCall` here are the "unresolved" variants the
     // builder composes during PTB construction. They get resolved to the
     // `iota_sdk_types::*` counterparts when `TransactionBuilder::finish()` is
     // called.
     unresolved::{Argument, Command, MoveCall},
+    PTBArgument,
+    PureBytes,
+    Receiving,
+    Shared,
+    SharedMut,
+    TransactionBuilder,
 };
 pub use iota_sdk_types::{
     Address, Identifier, Input, ObjectId, ObjectReference, SharedObjectReference, StructTag,
@@ -162,8 +167,7 @@ impl PtbBuilder {
         let cmd = Command::MoveCall(MoveCall {
             package: ObjectId::from(package),
             module: Identifier::new(module).expect("static module name is a valid Move identifier"),
-            function: Identifier::new(function)
-                .expect("static fn name is a valid Move identifier"),
+            function: Identifier::new(function).expect("static fn name is a valid Move identifier"),
             type_arguments,
             arguments,
         });
