@@ -10,7 +10,7 @@ use anyhow::Result;
 use move_binary_format::normalized::{self, NoPool};
 use move_core_types::{account_address::AccountAddress, identifier::Identifier};
 
-use crate::build::{BuildOptions, build_package};
+use crate::build::{build_package, BuildOptions};
 
 /// Output of the IR phase.
 ///

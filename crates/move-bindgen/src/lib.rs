@@ -9,4 +9,4 @@ mod build;
 mod ir;
 
 pub use build::BuildOptions;
-pub use ir::{Bindings, load_package, load_package_with_options};
+pub use ir::{load_package, load_package_with_options, Bindings};
