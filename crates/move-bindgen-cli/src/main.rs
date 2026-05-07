@@ -64,7 +64,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn default_out_dir(package: &std::path::Path, crate_name: &str) -> PathBuf {
-    let parent = package.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let parent = package
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     parent.join(crate_name)
 }
 
