@@ -87,19 +87,81 @@ fn emit_function(
     let fn_name = name.as_str();
     let fn_ident = safe_ident(name.as_str());
 
+    // Return shape:
+    //   0 returns → fn returns `()`
+    //   1 return  → fn returns `Argument` (the whole `Result(idx)`)
+    //   N returns → fn returns `(Argument; N)` (each a `NestedResult(idx, k)`)
+    let n_returns = f.return_.len();
+    let return_types: Vec<String> = f.return_.iter().map(|t| t.to_string()).collect();
+    let return_doc = match n_returns {
+        0 => String::new(),
+        1 => format!(" Returns: `{}`.", return_types[0]),
+        _ => format!(" Returns: `({})`.", return_types.join(", ")),
+    };
+
+    let (return_arrow, body_tail): (TokenStream, TokenStream) = match n_returns {
+        0 => (
+            TokenStream::new(),
+            quote! {
+                b.move_call(
+                    super::PACKAGE_ID,
+                    #module_name,
+                    #fn_name,
+                    #type_tags_expr,
+                    vec![ #( #arg_idents ),* ],
+                );
+            },
+        ),
+        1 => (
+            quote!(-> Argument),
+            quote! {
+                b.move_call(
+                    super::PACKAGE_ID,
+                    #module_name,
+                    #fn_name,
+                    #type_tags_expr,
+                    vec![ #( #arg_idents ),* ],
+                )
+            },
+        ),
+        n => {
+            let arg_repeat = (0..n).map(|_| quote!(Argument));
+            let nested = (0..n).map(|i| {
+                let i = i as u16;
+                quote!(Argument::NestedResult(idx, #i))
+            });
+            (
+                quote!(-> ( #( #arg_repeat ),* )),
+                quote! {
+                    match b.move_call(
+                        super::PACKAGE_ID,
+                        #module_name,
+                        #fn_name,
+                        #type_tags_expr,
+                        vec![ #( #arg_idents ),* ],
+                    ) {
+                        Argument::Result(idx) => ( #( #nested ),* ),
+                        _ => unreachable!("move_call always returns Argument::Result"),
+                    }
+                },
+            )
+        }
+    };
+
+    let doc_attr = if return_doc.is_empty() {
+        TokenStream::new()
+    } else {
+        quote!(#[doc = #return_doc])
+    };
+
     Ok(quote! {
+        #doc_attr
         pub async fn #fn_ident #generics_decl (
             b: &mut PtbBuilder
             #params_decl
-        ) -> Argument {
+        ) #return_arrow {
             #( #arg_exprs )*
-            b.move_call(
-                super::PACKAGE_ID,
-                #module_name,
-                #fn_name,
-                #type_tags_expr,
-                vec![ #( #arg_idents ),* ],
-            )
+            #body_tail
         }
     })
 }

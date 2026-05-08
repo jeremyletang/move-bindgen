@@ -35,6 +35,7 @@ move-symbol-pool        = { git = "https://github.com/iotaledger/iota.git", rev 
 # Sibling SDK — canonical client-side surface (PTB types + builder).
 iota-sdk-types               = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
 iota-sdk-transaction-builder = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
+iota-sdk-crypto              = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
 
 # Local-dev override: uncomment to point all iota git deps at a sibling checkout.
 # [patch."https://github.com/iotaledger/iota.git"]

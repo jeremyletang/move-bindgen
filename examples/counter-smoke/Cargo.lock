@@ -1453,6 +1453,7 @@ name = "move-bindgen-runtime"
 version = "0.1.0"
 dependencies = [
  "bcs",
+ "iota-sdk-crypto",
  "iota-sdk-graphql-client",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
