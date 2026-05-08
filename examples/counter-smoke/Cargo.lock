@@ -70,6 +70,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bech32"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32637268377fc7b10a8c6d51de3e7fba1ce5dd371a96e342b34e6078db558e7f"
+
+[[package]]
 name = "beef"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -269,7 +275,6 @@ name = "counter-smoke"
 version = "0.1.0"
 dependencies = [
  "counter-rs",
- "hex",
  "iota-sdk-crypto",
  "iota-sdk-graphql-client",
  "iota-sdk-types",
@@ -1188,6 +1193,7 @@ name = "iota-sdk-crypto"
 version = "0.0.1-alpha.1"
 source = "git+https://github.com/iotaledger/iota-rust-sdk.git?rev=dee951f490769f46c78ce84058f5d3cb8b606fd7#dee951f490769f46c78ce84058f5d3cb8b606fd7"
 dependencies = [
+ "bech32",
  "ed25519-dalek",
  "iota-sdk-types",
  "k256",

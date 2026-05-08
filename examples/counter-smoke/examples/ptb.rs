@@ -1,29 +1,34 @@
 //! Real-world usage of the generated `counter-rs` bindings against testnet.
 //!
-//! Fill in `PRIVATE_KEY_HEX` and `COUNTER_ID`, then `cargo run --example ptb`.
+//! Run with: `cargo run --example ptb -- <iotaprivkey1...>`.
 //! The example reads the on-chain `Counter`, increments it via PTB, then
 //! re-reads the `Counter` to show the updated state.
 
 use std::str::FromStr;
 
 use counter_rs::counter::{self, Counter};
-use hex::FromHex;
-use iota_sdk_crypto::ed25519::Ed25519PrivateKey;
+use iota_sdk_crypto::{ToFromBech32, ed25519::Ed25519PrivateKey};
 use iota_sdk_graphql_client::Client;
 use move_bindgen_runtime::*;
 
-const PRIVATE_KEY_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000001";
-const COUNTER_ID: &str = "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0";
+const COUNTER_ID: &str = "0x17b5fb620158dc2d08f9456415314b6f80b62432b28bebc7c7ac906e2509f4ea";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let private_key = std::env::args()
+        .nth(1)
+        .ok_or("usage: cargo run --example ptb -- <iotaprivkey1...>")?;
+
     let client = Client::new_testnet();
     let counter_id = ObjectId::from_str(COUNTER_ID)?;
 
     let counter: Counter = client.get_object(counter_id).await?;
     println!("counter (before): {counter:#?}");
 
-    increment_counter(&client, counter_id).await?;
+    increment_counter(&client, &private_key, counter_id).await?;
+
+    // GraphQL indexer lags a bit behind execution; wait before re-reading.
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     let counter: Counter = client.get_object(counter_id).await?;
     println!("counter (after):  {counter:#?}");
@@ -33,9 +38,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn increment_counter(
     client: &Client,
+    private_key: &str,
     counter_id: ObjectId,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let signer = Ed25519PrivateKey::new(<[u8; 32]>::from_hex(PRIVATE_KEY_HEX)?);
+    let signer = Ed25519PrivateKey::from_bech32(private_key)?;
     let sender = signer.public_key().derive_address();
 
     let mut ptb = PtbBuilder::new(sender)
