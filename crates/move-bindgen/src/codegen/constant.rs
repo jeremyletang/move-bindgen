@@ -17,26 +17,28 @@ use move_core_types::identifier::Identifier;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
+use crate::codegen::ty::TypeCtx;
 use crate::ir::ConstantNames;
 
 /// Emit `pub const NAME: T = value;` for every named constant in `module`.
 pub fn emit_constants(
     constants: &[std::rc::Rc<Constant<Identifier>>],
     names: &ConstantNames,
+    ctx: &TypeCtx,
 ) -> Result<TokenStream> {
     let mut out = TokenStream::new();
     for (i, c) in constants.iter().enumerate() {
         let Some(name) = names.get(i).and_then(|n| n.as_ref()) else {
             continue;
         };
-        if let Some(item) = emit_one(name, c)? {
+        if let Some(item) = emit_one(name, c, ctx)? {
             out.extend(item);
         }
     }
     Ok(out)
 }
 
-fn emit_one(name: &str, c: &Constant<Identifier>) -> Result<Option<TokenStream>> {
+fn emit_one(name: &str, c: &Constant<Identifier>, ctx: &TypeCtx) -> Result<Option<TokenStream>> {
     let ident = Ident::new(name, Span::call_site());
     let Some((ty, value)) = decode(&c.type_, &c.data)? else {
         // Type we don't know how to const-emit (e.g. vector<DatatypeRef>).
@@ -44,7 +46,13 @@ fn emit_one(name: &str, c: &Constant<Identifier>) -> Result<Option<TokenStream>>
         // hit corner cases as the language evolves.
         return Ok(None);
     };
+    let doc_attr = ctx
+        .docs
+        .item(ctx.current_module.as_str(), name)
+        .map(crate::codegen::outer_doc)
+        .unwrap_or_default();
     Ok(Some(quote! {
+        #doc_attr
         pub const #ident: #ty = #value;
     }))
 }
