@@ -189,7 +189,7 @@ fn param_bound(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
         Type::U32 => Ok(quote!(impl PureU32)),
         Type::U64 => Ok(quote!(impl PureU64)),
         Type::U128 => Ok(quote!(impl PureU128)),
-        Type::U256 => bail!("u256 parameters not yet supported"),
+        Type::U256 => Ok(quote!(impl PureU256)),
         Type::Address => Ok(quote!(impl PureAddress)),
         Type::Signer => bail!("`signer` is not supported on IOTA"),
         Type::Vector(inner) => {
@@ -230,11 +230,14 @@ fn datatype_bound(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStrea
             _ => {}
         }
     }
-    // Well-known iota framework types: ID/UID would land here. We don't
-    // currently emit `ArgumentID`/`ArgumentUID` traits, so error out for
-    // now — these rarely appear as direct call params anyway.
+    // Well-known iota framework types. `ID` is `copy + drop + store`, so it
+    // can be a value param — route through `PureID`. `UID` has no `drop` and
+    // can't be passed by value, so leave it bailing.
     if module_addr == IOTA_ADDRESS && module_name == "object" {
-        bail!("iota::object::{type_name} is not yet supported as a call-builder parameter");
+        match type_name {
+            "ID" => return Ok(quote!(impl PureID)),
+            _ => bail!("iota::object::{type_name} is not supported as a call-builder parameter"),
+        }
     }
 
     // Same-package datatype — use the codegen'd ArgumentX trait.

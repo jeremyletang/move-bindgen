@@ -39,6 +39,7 @@ pub use move_bindgen_ext::{
     InspectResult, ListGasCoinsFuture, ObjectTypeFinder, OracleError, RefGasPriceFuture,
     SubmitError, SubmitFuture, Submitter, SuggestBudgetFuture,
 };
+pub use primitive_types::U256;
 
 // -----------------------------------------------------------------------------
 // Framework types
@@ -83,6 +84,29 @@ impl MoveType for ID {
 impl MoveType for UID {
     fn type_tag() -> TypeTag {
         make_struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "UID", vec![])
+    }
+}
+
+// `ID` is `copy + drop + store` in Move — pass-by-value as a Move-call arg
+// works. Implementing `MoveArg` makes `PTBArgument for ID` available via the
+// SDK's blanket, and `PureID` can route through `apply_argument`.
+impl MoveArg for ID {
+    fn pure_bytes(self) -> PureBytes {
+        PureBytes(bcs::to_bytes(&self).expect("bcs serialization of ID never fails"))
+    }
+}
+
+impl From<Address> for ID {
+    fn from(bytes: Address) -> Self {
+        Self { bytes }
+    }
+}
+
+impl From<ObjectId> for ID {
+    fn from(id: ObjectId) -> Self {
+        Self {
+            bytes: Address::from(id),
+        }
     }
 }
 
@@ -650,6 +674,47 @@ decl_pure_trait!(PureU64, u64);
 decl_pure_trait!(PureU128, u128);
 decl_pure_trait!(PureAddress, Address);
 decl_pure_trait!(PureString, String);
+decl_pure_trait!(PureID, ID);
+
+// `primitive_types::U256` ships a serde impl (`impl-serde`) that always uses
+// hex strings, which is incompatible with Move's BCS-as-32-LE-bytes wire
+// format. The codegen attaches `#[serde(with = "u256_le")]` to every U256
+// struct/enum field, and the `PureU256` impl below pushes a `Pure` input with
+// the correct LE bytes — bypassing the SDK's broken `MoveArg for U256`.
+pub mod u256_le {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::U256;
+
+    pub fn serialize<S: Serializer>(v: &U256, s: S) -> Result<S::Ok, S::Error> {
+        let bytes = v.to_little_endian();
+        bytes.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<U256, D::Error> {
+        let bytes = <[u8; 32]>::deserialize(d)?;
+        Ok(U256::from_little_endian(&bytes))
+    }
+}
+
+pub trait PureU256 {
+    #[allow(async_fn_in_trait)]
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized;
+}
+
+impl PureU256 for U256 {
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument {
+        b.inner.input(Input::Pure(self.to_little_endian().to_vec()))
+    }
+}
+
+impl PureU256 for Argument {
+    async fn into_argument(self, _b: &mut PtbBuilder) -> Argument {
+        self
+    }
+}
 
 /// Generic marker for `vector<T>` — closed to `Vec<T>` (where T:MoveArg) and
 /// `Argument`.

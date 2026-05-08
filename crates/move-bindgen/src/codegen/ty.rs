@@ -45,7 +45,7 @@ pub fn rust_type(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
         Type::U32 => quote!(u32),
         Type::U64 => quote!(u64),
         Type::U128 => quote!(u128),
-        Type::U256 => bail!("u256 not yet supported in generated code"),
+        Type::U256 => quote!(U256),
         Type::Address => quote!(Address),
         Type::Signer => bail!("`signer` is not supported on IOTA"),
         Type::Vector(inner) => {
@@ -127,7 +127,7 @@ pub fn type_tag_expr(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
         Type::U32 => quote!(TypeTag::U32),
         Type::U64 => quote!(TypeTag::U64),
         Type::U128 => quote!(TypeTag::U128),
-        Type::U256 => bail!("u256 not yet supported"),
+        Type::U256 => quote!(TypeTag::U256),
         Type::Address => quote!(TypeTag::Address),
         Type::Signer => bail!("`signer` is not supported on IOTA"),
         Type::Vector(inner) => {

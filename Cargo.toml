@@ -21,8 +21,9 @@ move-bindgen-runtime = { path = "crates/move-bindgen-runtime" }
 move-bindgen-ext     = { path = "crates/move-bindgen-ext" }
 
 # Used by both the runtime and generated code
-serde = { version = "1", features = ["derive"] }
-bcs   = "0.1"
+serde           = { version = "1", features = ["derive"] }
+bcs             = "0.1"
+primitive-types = { version = "0.14", features = ["impl-serde"] }
 
 # IOTA build chain — pinned git deps to the iota monorepo.
 # Bump `IOTA_REV` together below when you want to update.

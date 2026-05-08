@@ -9,6 +9,8 @@ public struct Counter has key, store {
     id: UID,
     owner: address,
     value: u64,
+    big_value: u256,
+    target: Option<ID>,
 }
 
 public struct AdminCap has key, store {
@@ -20,6 +22,8 @@ public fun create(ctx: &mut TxContext): AdminCap {
         id: object::new(ctx),
         owner: ctx.sender(),
         value: 0,
+        big_value: 0,
+        target: option::none(),
     });
     AdminCap { id: object::new(ctx) }
 }
@@ -27,6 +31,14 @@ public fun create(ctx: &mut TxContext): AdminCap {
 public fun increment(c: &mut Counter, by: u64) {
     assert!(by <= MAX_INCREMENT, 0);
     c.value = c.value + by;
+}
+
+public fun increment_big(c: &mut Counter, by: u256) {
+    c.big_value = c.big_value + by;
+}
+
+public fun set_target(c: &mut Counter, target: ID) {
+    c.target = option::some(target);
 }
 
 public entry fun increment_entry(c: &mut Counter, by: u64) {
