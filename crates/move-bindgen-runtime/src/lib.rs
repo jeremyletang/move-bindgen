@@ -676,6 +676,35 @@ decl_pure_trait!(PureAddress, Address);
 decl_pure_trait!(PureString, String);
 decl_pure_trait!(PureID, ID);
 
+/// Generic fallback trait used by codegen wherever it would otherwise
+/// emit a bare `impl PTBArgument` — i.e. for generic type parameters
+/// (`fun foo<T>(x: T)`) and for foreign-framework types whose specific
+/// marker traits aren't available (e.g. `iota::object::UID`). Has the
+/// same closed-impl shape as the per-package `ArgumentX` traits, so
+/// callers can pass `Argument`, `ObjectId` (cache-aware), `ObjectReference`,
+/// `Shared<ObjectId>`, `SharedMut<ObjectId>`, or `Receiving<ObjectId>`.
+/// Loses per-type safety in arg position but keeps `.into_argument(b)`
+/// resolvable from generated code.
+pub trait ArgumentObject<T>: PTBArgument {
+    #[allow(async_fn_in_trait)]
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        b.inner.apply_argument(self)
+    }
+}
+impl<T> ArgumentObject<T> for Argument {}
+impl<T> ArgumentObject<T> for ObjectId {
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument {
+        b.resolve_object(self).await
+    }
+}
+impl<T> ArgumentObject<T> for ObjectReference {}
+impl<T> ArgumentObject<T> for Shared<ObjectId> {}
+impl<T> ArgumentObject<T> for SharedMut<ObjectId> {}
+impl<T> ArgumentObject<T> for Receiving<ObjectId> {}
+
 // `primitive_types::U256` ships a serde impl (`impl-serde`) that always uses
 // hex strings, which is incompatible with Move's BCS-as-32-LE-bytes wire
 // format. The codegen attaches `#[serde(with = "u256_le")]` to every U256

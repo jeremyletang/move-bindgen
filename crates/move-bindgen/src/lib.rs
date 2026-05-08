@@ -10,9 +10,11 @@ mod codegen;
 mod config;
 mod docs;
 mod ir;
+mod peer;
 
 pub use build::BuildOptions;
-pub use codegen::{generate, GenerateOptions, GeneratedCrate};
+pub use codegen::{generate, GenerateOptions, GeneratedCrate, PeerDep};
 pub use config::{config_path_in, Config, OutputFormat, PackageEntry, RuntimeSpec};
 pub use docs::DocMap;
 pub use ir::{load_package, load_package_with_options, Bindings};
+pub use peer::{foreign_addresses_used, PeerEntry, PeerMap};
