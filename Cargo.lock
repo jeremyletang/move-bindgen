@@ -4435,14 +4435,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "move-bindgen-ext"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "iota-sdk-graphql-client",
+ "iota-sdk-transaction-builder",
+ "iota-sdk-types",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "move-bindgen-runtime"
 version = "0.1.0"
 dependencies = [
  "bcs",
  "iota-sdk-crypto",
- "iota-sdk-graphql-client",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
+ "move-bindgen-ext",
  "move-core-types",
  "serde",
  "thiserror 2.0.18",

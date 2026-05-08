@@ -15,16 +15,7 @@ move-core-types.workspace              = true
 iota-sdk-types.workspace               = true
 iota-sdk-transaction-builder.workspace = true
 iota-sdk-crypto.workspace              = true
-
-# Optional: enables the built-in `Fetcher` impl for `iota_sdk_graphql_client::Client`.
-iota-sdk-graphql-client = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false, optional = true }
-
-[features]
-default = []
-# Enables `impl Fetcher for iota_sdk_graphql_client::Client`. Saves users
-# from writing the boilerplate fetcher when they're already using the
-# canonical SDK client.
-graphql-client = ["dep:iota-sdk-graphql-client"]
+move-bindgen-ext.workspace             = true
 
 [lints]
 workspace = true

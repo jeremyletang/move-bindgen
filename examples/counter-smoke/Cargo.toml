@@ -7,7 +7,7 @@ description = "Smoke test for the generated counter-rs bindings."
 
 [dependencies]
 counter-rs              = { path = "../counter-rs" }
-move-bindgen-runtime    = { path = "../../crates/move-bindgen-runtime", features = ["graphql-client"] }
+move-bindgen-runtime    = { path = "../../crates/move-bindgen-runtime" }
 iota-sdk-types          = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
 iota-sdk-crypto         = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
 iota-sdk-graphql-client = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
