@@ -13,6 +13,6 @@ mod ir;
 
 pub use build::BuildOptions;
 pub use codegen::{generate, GenerateOptions, GeneratedCrate};
-pub use config::{Config, OutputFormat, PackageEntry, RuntimeSpec, config_path_in};
+pub use config::{config_path_in, Config, OutputFormat, PackageEntry, RuntimeSpec};
 pub use docs::DocMap;
 pub use ir::{load_package, load_package_with_options, Bindings};

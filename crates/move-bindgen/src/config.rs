@@ -101,7 +101,11 @@ impl Config {
     /// Resolve a `[packages.*].raw_path` against the supplied input
     /// folders. First match wins. Errors if none of them contain a
     /// `Move.toml` at the given relative path.
-    pub fn resolve_package_path(&self, entry: &PackageEntry, input_folders: &[PathBuf]) -> Result<PathBuf> {
+    pub fn resolve_package_path(
+        &self,
+        entry: &PackageEntry,
+        input_folders: &[PathBuf],
+    ) -> Result<PathBuf> {
         let candidates: Vec<PathBuf> = if input_folders.is_empty() {
             vec![self.config_dir.clone()]
         } else {
@@ -131,16 +135,19 @@ impl Config {
         let format = match raw.output.format.as_str() {
             "single-crate" => OutputFormat::SingleCrate,
             "workspace" => OutputFormat::Workspace,
-            other => bail!(
-                "[output].format must be 'single-crate' or 'workspace', got '{other}'"
-            ),
+            other => bail!("[output].format must be 'single-crate' or 'workspace', got '{other}'"),
         };
 
         let runtime = RuntimeSpec::from_raw(raw.output.runtime).context("[output].runtime")?;
 
         let framework_packages = raw
             .framework_packages
-            .unwrap_or_else(|| DEFAULT_FRAMEWORK_PACKAGES.iter().map(|s| s.to_string()).collect())
+            .unwrap_or_else(|| {
+                DEFAULT_FRAMEWORK_PACKAGES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            })
             .into_iter()
             .collect::<BTreeSet<_>>();
 
@@ -216,7 +223,13 @@ pub fn default_crate_name(raw_path: &Path) -> String {
         .unwrap_or("package");
     let kebab: String = stem
         .chars()
-        .map(|c| if c == '_' { '-' } else { c.to_ascii_lowercase() })
+        .map(|c| {
+            if c == '_' {
+                '-'
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
         .collect();
     format!("{kebab}-rs")
 }
@@ -403,7 +416,10 @@ mod tests {
         assert_eq!(cfg.packages[1].crate_name(), "foo-rs");
         assert_eq!(
             cfg.framework_packages,
-            DEFAULT_FRAMEWORK_PACKAGES.iter().map(|s| s.to_string()).collect()
+            DEFAULT_FRAMEWORK_PACKAGES
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
         );
     }
 
@@ -439,7 +455,10 @@ mod tests {
             "#,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("incompatible with a `[package]`"), "{err}");
+        assert!(
+            err.to_string().contains("incompatible with a `[package]`"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -502,7 +521,8 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            err.to_string().contains("would both produce crate 'shared-rs'"),
+            err.to_string()
+                .contains("would both produce crate 'shared-rs'"),
             "{err}"
         );
     }
@@ -559,7 +579,10 @@ mod tests {
 
     #[test]
     fn default_crate_name_kebabs_underscores() {
-        assert_eq!(default_crate_name(Path::new("oracle_price_feed")), "oracle-price-feed-rs");
+        assert_eq!(
+            default_crate_name(Path::new("oracle_price_feed")),
+            "oracle-price-feed-rs"
+        );
         assert_eq!(default_crate_name(Path::new("Counter")), "counter-rs");
         assert_eq!(default_crate_name(Path::new("packages/foo")), "foo-rs");
     }

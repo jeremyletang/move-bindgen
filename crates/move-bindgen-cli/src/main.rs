@@ -79,8 +79,7 @@ fn main() -> anyhow::Result<()> {
             config,
             input_folders,
         } => {
-            let config_path =
-                config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
+            let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
             let cfg = Config::load(&config_path)?;
             check_config(&cfg, &input_folders)?;
         }
