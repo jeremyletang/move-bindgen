@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use move_binary_format::file_format::Visibility;
-use move_bindgen::{config_path_in, Bindings, Config, OutputFormat};
+use move_bindgen::{config_path_in, Bindings, Config, OutputFormat, RuntimeSpec};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -24,17 +24,34 @@ enum Cmd {
     },
     /// Build the package and write a complete Rust bindings crate.
     ///
-    /// Output is a directory containing `Cargo.toml`, `src/lib.rs`, and one
-    /// `src/<module>.rs` per Move module that has datatypes. Defaults to
-    /// `<package>-rs` next to the Move package directory.
+    /// Two modes:
+    ///   1. Zero-config: pass a positional `<package>` path — generates
+    ///      one crate at `<package>-rs` (or `--out`). Uses
+    ///      `--runtime-path` for the runtime dep in `Cargo.toml`.
+    ///   2. Config-driven: pass `--config <toml>`. Reads
+    ///      `move-bindgen.toml`; output goes alongside the config (or to
+    ///      `--out`); runtime dep comes from the config.
     Generate {
-        /// Path to the Move package (directory containing `Move.toml`).
-        package: PathBuf,
-        /// Output directory. Defaults to `<package>-rs` sibling to `package`.
+        /// Zero-config: path to a Move package (directory with `Move.toml`).
+        #[arg(conflicts_with = "config")]
+        package: Option<PathBuf>,
+        /// Config-driven: path to a `move-bindgen.toml`. Mutually
+        /// exclusive with the positional `<package>`.
+        #[arg(long, conflicts_with = "package")]
+        config: Option<PathBuf>,
+        /// Where to look for the Move packages referenced by
+        /// `[packages.*].path` in the config. Repeatable; first match
+        /// wins. Defaults to the config file's directory.
+        #[arg(long = "input-folder", requires = "config")]
+        input_folders: Vec<PathBuf>,
+        /// Output directory. Defaults to `<package>-rs` sibling to
+        /// `package` (zero-config mode) or `<config-dir>/<output.name>`
+        /// (config mode).
         #[arg(long, short = 'o')]
         out: Option<PathBuf>,
-        /// Path-dependency to use for `move-bindgen-runtime` in the
-        /// generated `Cargo.toml`. Default targets the in-tree runtime.
+        /// Path dependency for `move-bindgen-runtime` in zero-config mode.
+        /// Ignored when `--config` is set (the config's runtime takes
+        /// precedence).
         #[arg(long, default_value = "../../crates/move-bindgen-runtime")]
         runtime_path: String,
     },
@@ -65,16 +82,17 @@ fn main() -> anyhow::Result<()> {
         }
         Cmd::Generate {
             package,
+            config,
+            input_folders,
             out,
             runtime_path,
-        } => {
-            let bindings = move_bindgen::load_package(&package)?;
-            let opts = move_bindgen::GenerateOptions { runtime_path };
-            let crate_ = move_bindgen::generate(&bindings, &opts)?;
-            let out_dir = out.unwrap_or_else(|| default_out_dir(&package, &crate_.crate_name));
-            write_crate(&out_dir, &crate_)?;
-            eprintln!("wrote crate to {}", out_dir.display());
-        }
+        } => match (package, config) {
+            (Some(pkg), None) => generate_zero_config(&pkg, out.as_deref(), &runtime_path)?,
+            (None, Some(cfg)) => generate_with_config(&cfg, &input_folders, out.as_deref())?,
+            _ => anyhow::bail!(
+                "pass either a positional <package> path or --config <toml>, but not both"
+            ),
+        },
         Cmd::Check {
             config,
             input_folders,
@@ -85,6 +103,117 @@ fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn generate_zero_config(
+    package: &Path,
+    out: Option<&Path>,
+    runtime_path: &str,
+) -> anyhow::Result<()> {
+    let bindings = move_bindgen::load_package(package)?;
+    let opts = move_bindgen::GenerateOptions {
+        runtime: RuntimeSpec::Path(PathBuf::from(runtime_path)),
+    };
+    let crate_ = move_bindgen::generate(&bindings, &opts)?;
+    let out_dir = out
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| default_out_dir(package, &crate_.crate_name));
+    write_crate(&out_dir, &crate_)?;
+    eprintln!("wrote crate to {}", out_dir.display());
+    Ok(())
+}
+
+fn generate_with_config(
+    config_path: &Path,
+    input_folders: &[PathBuf],
+    out: Option<&Path>,
+) -> anyhow::Result<()> {
+    let cfg = Config::load(config_path)?;
+    match cfg.format {
+        OutputFormat::SingleCrate => {
+            let entry = cfg
+                .packages
+                .first()
+                .expect("validator guarantees one entry in single-crate mode");
+            let pkg_path = cfg.resolve_package_path(entry, input_folders)?;
+            let bindings = move_bindgen::load_package(&pkg_path)?;
+            // Default name = `<entry crate name>` (e.g. `counter-rs`).
+            let out_name = cfg
+                .output_name
+                .clone()
+                .unwrap_or_else(|| entry.crate_name());
+            let out_dir = out
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| cfg.config_dir.join(&out_name));
+            let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &out_dir);
+            let opts = move_bindgen::GenerateOptions { runtime };
+            let crate_ = move_bindgen::generate(&bindings, &opts)?;
+            write_crate(&out_dir, &crate_)?;
+            eprintln!("wrote crate to {}", out_dir.display());
+        }
+        OutputFormat::Workspace => {
+            anyhow::bail!("workspace mode is not yet wired up — codegen step still pending");
+        }
+    }
+    Ok(())
+}
+
+/// For `RuntimeSpec::Path`, the path in the config is relative to the
+/// config's directory; the `Cargo.toml` we write needs the path relative
+/// to the output directory. Resolve via canonicalisation, then
+/// re-relativise. Falls back to the original path if canonicalisation
+/// fails (e.g. the runtime crate doesn't exist at codegen time).
+fn relativize_runtime(spec: &RuntimeSpec, config_dir: &Path, output_dir: &Path) -> RuntimeSpec {
+    match spec {
+        RuntimeSpec::Path(p) => {
+            let abs_runtime = config_dir.join(p);
+            let abs_runtime = std::fs::canonicalize(&abs_runtime).unwrap_or(abs_runtime);
+            // Output dir may not yet exist; canonicalise its parent and
+            // append the basename.
+            let abs_out = canonicalise_or_keep(output_dir);
+            let rel = relative_from(&abs_runtime, &abs_out);
+            RuntimeSpec::Path(rel)
+        }
+        other => other.clone(),
+    }
+}
+
+fn canonicalise_or_keep(p: &Path) -> PathBuf {
+    if let Ok(c) = std::fs::canonicalize(p) {
+        return c;
+    }
+    if let (Some(parent), Some(name)) = (p.parent(), p.file_name()) {
+        if let Ok(c) = std::fs::canonicalize(parent) {
+            return c.join(name);
+        }
+    }
+    p.to_path_buf()
+}
+
+/// Compute a relative path from `from` to `target`, both expected to be
+/// absolute. Falls back to `target` as-is if they share no common prefix.
+fn relative_from(target: &Path, from: &Path) -> PathBuf {
+    let target_parts: Vec<_> = target.components().collect();
+    let from_parts: Vec<_> = from.components().collect();
+    let common = target_parts
+        .iter()
+        .zip(from_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    if common == 0 {
+        return target.to_path_buf();
+    }
+    let mut out = PathBuf::new();
+    for _ in common..from_parts.len() {
+        out.push("..");
+    }
+    for c in &target_parts[common..] {
+        out.push(c.as_os_str());
+    }
+    if out.as_os_str().is_empty() {
+        out.push(".");
+    }
+    out
 }
 
 fn check_config(cfg: &Config, input_folders: &[PathBuf]) -> anyhow::Result<()> {

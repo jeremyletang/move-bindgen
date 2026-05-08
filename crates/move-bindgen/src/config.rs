@@ -567,6 +567,7 @@ mod tests {
             r#"
             [output]
             format = "workspace"
+            name   = "ws"
             runtime = "0.1"
 
             [packages.foo]
