@@ -12,6 +12,16 @@ use move_core_types::{account_address::AccountAddress, identifier::Identifier};
 
 use crate::build::{build_package, BuildOptions};
 
+/// Per-module: constant-pool index → source-level constant name.
+///
+/// Bytecode `module.constants` carries only `(type, BCS-data)` — names are
+/// dropped at compilation. The source map preserves them, so we read it
+/// alongside the bytecode and reverse the `name → idx` mapping. `None` at
+/// some index means that constant was synthesised by the compiler (e.g.
+/// `#[error]` clever-error metadata, or address literals from source) and
+/// has no user-facing name.
+pub type ConstantNames = Vec<Option<String>>;
+
 /// Output of the IR phase.
 ///
 /// `Identifier` is the chosen name representation (no Rc/Arc interning — pkgs
@@ -24,6 +34,9 @@ pub struct Bindings {
     /// dump on unpublished packages.
     pub published_at: Option<AccountAddress>,
     pub modules: Vec<normalized::Module<Identifier>>,
+    /// Parallel to `modules`. Indexed the same way as
+    /// `module.constants` — see [`ConstantNames`].
+    pub constant_names: Vec<ConstantNames>,
 }
 
 /// Build `path` and produce the IR.
@@ -48,16 +61,36 @@ pub fn load_package_with_options(path: &Path, opts: &BuildOptions) -> Result<Bin
         .map(|id| AccountAddress::new(id.into_bytes()));
 
     let mut pool = NoPool;
-    let modules = pkg
-        .package
-        .root_compiled_units
-        .iter()
-        .map(|u| normalized::Module::new(&mut pool, &u.unit.module, /* include_code */ false))
-        .collect();
+    let mut modules = Vec::with_capacity(pkg.package.root_compiled_units.len());
+    let mut constant_names = Vec::with_capacity(pkg.package.root_compiled_units.len());
+
+    for u in pkg.package.root_compiled_units.iter() {
+        let normalized =
+            normalized::Module::new(&mut pool, &u.unit.module, /* include_code */ false);
+        let names = constant_names_from_source_map(&u.unit.source_map, normalized.constants.len());
+        modules.push(normalized);
+        constant_names.push(names);
+    }
 
     Ok(Bindings {
         package_name,
         published_at,
         modules,
+        constant_names,
     })
+}
+
+/// Read constant names out of the source map, indexed by constant-pool index.
+fn constant_names_from_source_map(
+    sm: &move_bytecode_source_map::source_map::SourceMap,
+    num_constants: usize,
+) -> ConstantNames {
+    let mut names = vec![None; num_constants];
+    for (name, &idx) in &sm.constant_map {
+        let i = idx as usize;
+        if i < names.len() {
+            names[i] = Some(name.to_string());
+        }
+    }
+    names
 }

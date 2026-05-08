@@ -1,7 +1,11 @@
-//! Codegen for Move structs and enums, including their `MoveType` impls.
+//! Codegen for Move structs and enums: the Rust type, its `MoveType` impl,
+//! and the per-datatype `ArgumentX` marker trait used by call builders.
 
 use anyhow::Result;
-use move_binary_format::normalized::{Enum, Field, Module, Struct};
+use move_binary_format::{
+    file_format::AbilitySet,
+    normalized::{Enum, Field, Module, Struct},
+};
 use move_core_types::identifier::Identifier;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
@@ -54,6 +58,7 @@ fn emit_struct(
     }
 
     let move_type = move_type_impl(&s.name, module, &g);
+    let arg_trait = argument_trait(&s.name, &g, s.abilities);
 
     let decl = &g.decl;
     Ok(quote! {
@@ -62,6 +67,7 @@ fn emit_struct(
             #field_tokens
         }
         #move_type
+        #arg_trait
     })
 }
 
@@ -119,6 +125,7 @@ fn emit_enum(
     }
 
     let move_type = move_type_impl(&e.name, module, &g);
+    let arg_trait = argument_trait(&e.name, &g, e.abilities);
     let decl = &g.decl;
     Ok(quote! {
         #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -126,6 +133,7 @@ fn emit_enum(
             #variants
         }
         #move_type
+        #arg_trait
     })
 }
 
@@ -187,6 +195,91 @@ fn move_type_impl(
             fn type_tag() -> TypeTag {
                 make_struct_tag(super::PACKAGE_ID, #module_name, #type_name_s, #type_params)
             }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ArgumentX marker trait
+// -----------------------------------------------------------------------------
+
+/// Emit the per-datatype marker trait + impls.
+///
+/// - `key` types are objects: closed impls on `Argument`, `ObjectId` (cache-aware
+///   override), `ObjectReference`, `Shared<ObjectId>`, `SharedMut<ObjectId>`,
+///   `Receiving<ObjectId>`.
+/// - non-`key` types are values: emit `MoveArg` (BCS via `bcs::to_bytes`) so
+///   the SDK's blanket gives us `PTBArgument`, plus closed impls on `Argument`
+///   and the type itself.
+fn argument_trait(type_name: &Identifier, g: &Generics, abilities: AbilitySet) -> TokenStream {
+    let name = ident(type_name.as_str());
+    let trait_name = format_ident!("Argument{}", type_name.as_str());
+
+    let decl = &g.decl; // <T0: MoveType, …>
+    let args = &g.args; // <T0, …>
+
+    if abilities.has_key() {
+        // Object trait. The default `into_argument` body delegates to the
+        // SDK; the `ObjectId` impl overrides it for cache-aware resolution
+        // (with optional Fetcher fallback for unknown ids).
+        quote! {
+            pub trait #trait_name #decl: PTBArgument {
+                #[allow(async_fn_in_trait)]
+                async fn into_argument(self, b: &mut PtbBuilder) -> Argument
+                where Self: Sized,
+                {
+                    b.inner.apply_argument(self)
+                }
+            }
+            impl #decl #trait_name #args for Argument {}
+            impl #decl #trait_name #args for ObjectId {
+                async fn into_argument(self, b: &mut PtbBuilder) -> Argument {
+                    b.resolve_object(self).await
+                }
+            }
+            impl #decl #trait_name #args for ObjectReference {}
+            impl #decl #trait_name #args for Shared<ObjectId> {}
+            impl #decl #trait_name #args for SharedMut<ObjectId> {}
+            impl #decl #trait_name #args for Receiving<ObjectId> {}
+        }
+    } else {
+        // Value trait. `MoveArg` impl gives BCS-Pure encoding; PTBArgument is
+        // then auto-impl'd via the SDK's blanket `impl<T: MoveArg> PTBArgument for T`.
+        let move_arg_decl = if g.names.is_empty() {
+            quote!()
+        } else {
+            // For generic value types we need a Serialize bound on each T_i so
+            // bcs::to_bytes(&self) compiles.
+            let parts = g
+                .names
+                .iter()
+                .map(|n| quote! { #n: MoveType + ::serde::Serialize });
+            quote!(< #( #parts ),* >)
+        };
+        let serialize_bound = if g.names.is_empty() {
+            quote!()
+        } else {
+            quote!(where Self: ::serde::Serialize)
+        };
+        let _ = serialize_bound;
+
+        quote! {
+            impl #move_arg_decl MoveArg for #name #args {
+                fn pure_bytes(self) -> PureBytes {
+                    PureBytes(::bcs::to_bytes(&self).expect("bcs serialization failed"))
+                }
+            }
+
+            pub trait #trait_name #decl: PTBArgument {
+                #[allow(async_fn_in_trait)]
+                async fn into_argument(self, b: &mut PtbBuilder) -> Argument
+                where Self: Sized,
+                {
+                    b.inner.apply_argument(self)
+                }
+            }
+            impl #move_arg_decl #trait_name #args for #name #args {}
+            impl #decl #trait_name #args for Argument {}
         }
     }
 }

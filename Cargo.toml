@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/move-bindgen",
     "crates/move-bindgen-cli",
+    "crates/move-bindgen-ext",
     "crates/move-bindgen-runtime",
 ]
 
@@ -15,8 +16,9 @@ repository = "https://github.com/jeremyletang/move-bindgen"
 
 [workspace.dependencies]
 # Internal crates
-move-bindgen = { path = "crates/move-bindgen" }
+move-bindgen         = { path = "crates/move-bindgen" }
 move-bindgen-runtime = { path = "crates/move-bindgen-runtime" }
+move-bindgen-ext     = { path = "crates/move-bindgen-ext" }
 
 # Used by both the runtime and generated code
 serde = { version = "1", features = ["derive"] }
@@ -26,11 +28,18 @@ bcs   = "0.1"
 # Bump `IOTA_REV` together below when you want to update.
 iota-move-build         = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 iota-package-management = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
-move-binary-format      = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
-move-bytecode-utils     = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-binary-format       = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-bytecode-source-map = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-bytecode-utils      = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-core-types         = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-package            = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-symbol-pool        = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+
+# Sibling SDK — canonical client-side surface (PTB types + builder).
+iota-sdk-types               = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
+iota-sdk-transaction-builder = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
+iota-sdk-crypto              = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
+iota-sdk-graphql-client      = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
 
 # Local-dev override: uncomment to point all iota git deps at a sibling checkout.
 # [patch."https://github.com/iotaledger/iota.git"]
@@ -41,6 +50,9 @@ move-symbol-pool        = { git = "https://github.com/iotaledger/iota.git", rev 
 # move-core-types         = { path = "../iota/external-crates/move/crates/move-core-types" }
 # move-package            = { path = "../iota/external-crates/move/crates/move-package" }
 # move-symbol-pool        = { path = "../iota/external-crates/move/crates/move-symbol-pool" }
+# [patch."https://github.com/iotaledger/iota-rust-sdk.git"]
+# iota-sdk-types               = { path = "../iota-rust-sdk/crates/iota-sdk-types" }
+# iota-sdk-transaction-builder = { path = "../iota-rust-sdk/crates/iota-sdk-transaction-builder" }
 
 # Codegen
 syn          = { version = "2", features = ["full"] }

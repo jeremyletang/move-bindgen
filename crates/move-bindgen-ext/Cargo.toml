@@ -1,0 +1,19 @@
+[package]
+name = "move-bindgen-ext"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Backend traits + GraphQL-client integration consumed by move-bindgen-runtime"
+
+[dependencies]
+iota-sdk-types.workspace               = true
+iota-sdk-transaction-builder.workspace = true
+iota-sdk-graphql-client.workspace      = true
+serde.workspace                        = true
+bcs.workspace                          = true
+thiserror.workspace                    = true
+
+[lints]
+workspace = true

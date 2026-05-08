@@ -1,6 +1,7 @@
 [package]
 name = "counter"
 edition = "2024"
+published-at = "0xc8f01b1ea8740c4d0d41f0afb4a3b611d7ec7672fbb6c55547b647ea4bb36f39"
 
 [addresses]
-counter = "0x0"
+counter = "0xc8f01b1ea8740c4d0d41f0afb4a3b611d7ec7672fbb6c55547b647ea4bb36f39"
