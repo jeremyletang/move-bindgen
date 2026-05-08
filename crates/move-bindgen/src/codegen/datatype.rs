@@ -4,13 +4,25 @@
 use anyhow::Result;
 use move_binary_format::{
     file_format::AbilitySet,
-    normalized::{Enum, Field, Module, Struct},
+    normalized::{Enum, Field, Module, Struct, Type},
 };
 use move_core_types::identifier::Identifier;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 
 use crate::codegen::ty::{rust_type, type_param_is_used, TypeCtx};
+
+/// Returns a `#[serde(with = "...")]` attribute for fields whose Move type
+/// has no native serde-compatible Rust counterpart and needs a custom (de)
+/// serialiser. Currently only `u256` (the `primitive_types::U256` re-export)
+/// — its built-in `impl-serde` uses hex strings, which doesn't match Move's
+/// 32-LE-bytes BCS encoding.
+fn field_serde_attr(ty: &Type<Identifier>) -> TokenStream {
+    match ty {
+        Type::U256 => quote!(#[serde(with = "move_bindgen_runtime::u256_le")]),
+        _ => TokenStream::new(),
+    }
+}
 
 /// Emit all datatypes (structs + enums) defined in `module`.
 pub fn emit_datatypes(module: &Module<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
@@ -43,7 +55,8 @@ fn emit_struct(
     for f in &s.fields {
         let fname = field_ident(f.name.as_str());
         let fty = rust_type(&f.type_, ctx)?;
-        field_tokens.extend(quote! { pub #fname: #fty, });
+        let attr = field_serde_attr(&f.type_);
+        field_tokens.extend(quote! { #attr pub #fname: #fty, });
     }
     // Any unused param needs PhantomData to keep Rust happy.
     for (i, &phantom) in phantoms.iter().enumerate() {
@@ -96,18 +109,23 @@ fn emit_enum(
         if v.fields.is_empty() {
             variants.extend(quote! { #vname, });
         } else if is_positional(&v.fields) {
-            let tys: Vec<TokenStream> = v
+            let parts: Vec<TokenStream> = v
                 .fields
                 .iter()
-                .map(|f| rust_type(&f.type_, ctx))
+                .map(|f| {
+                    let attr = field_serde_attr(&f.type_);
+                    let ty = rust_type(&f.type_, ctx)?;
+                    Ok::<_, anyhow::Error>(quote!(#attr #ty))
+                })
                 .collect::<Result<_>>()?;
-            variants.extend(quote! { #vname( #( #tys ),* ), });
+            variants.extend(quote! { #vname( #( #parts ),* ), });
         } else {
             let mut named = TokenStream::new();
             for f in &v.fields {
                 let fname = field_ident(f.name.as_str());
                 let fty = rust_type(&f.type_, ctx)?;
-                named.extend(quote! { #fname: #fty, });
+                let attr = field_serde_attr(&f.type_);
+                named.extend(quote! { #attr #fname: #fty, });
             }
             variants.extend(quote! { #vname { #named }, });
         }
