@@ -1,0 +1,60 @@
+# Workspace bindings for the realmarkets/dex monorepo.
+#
+# Usage (from the repo root):
+#   cargo run -p move-bindgen-cli -- check \
+#       --config configs/exchange.toml \
+#       --input-folder ../dex
+#
+# Paths below are repo-relative (i.e. relative to the dex repo root) so the
+# `--input-folder` points at the dex checkout itself.
+#
+# `Iota` and `MoveStdlib` aren't listed — their types are covered by
+# `move-bindgen-runtime` (UID, ID, Option, String, …). Default
+# `framework_packages` already excludes them.
+
+[output]
+format  = "workspace"
+name    = "dex-rs"
+runtime = { path = "../crates/move-bindgen-runtime" }
+
+[packages.account-registry]
+path = "packages/account-registry"
+
+[packages.exchange]
+path = "packages/exchange"
+
+[packages.faucet]
+path = "packages/faucet"
+
+[packages.fixed18]
+path = "packages/fixed18"
+
+[packages.funding]
+path = "packages/funding"
+
+[packages.metadata]
+path = "packages/metadata"
+
+[packages.oracle-mock-source]
+path = "packages/oracle-mock-source"
+
+[packages.oracle-price-feed]
+path = "packages/oracle-price-feed"
+
+[packages.oracle-pyth-source]
+path = "packages/oracle-pyth-source"
+
+[packages.ring-buffer]
+path = "packages/ring-buffer"
+
+[packages.soul-bound]
+path = "packages/soul-bound"
+
+[packages.stable]
+path = "packages/stable"
+
+[packages.test]
+path = "packages/test"
+
+[packages.tuple]
+path = "packages/tuple"

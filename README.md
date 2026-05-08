@@ -34,11 +34,15 @@ exercise codegen.
 
 | Path          | What's there                                              |
 | ------------- | --------------------------------------------------------- |
-| `crates/`     | The tooling itself                                        |
-| `packages/`   | Committed Move source packages used as test inputs        |
-| `configs/`    | Committed `move-bindgen.toml` files driving end-to-end runs |
-| `generated/`  | Gitignored — `move-bindgen generate` writes output here    |
-| `tests/`      | Rust crates that exercise the generated bindings           |
+| `crates/`     | The tooling itself                                                     |
+| `packages/`   | Committed Move source packages used as test inputs                     |
+| `configs/`    | Committed `move-bindgen.toml` files driving end-to-end runs            |
+| `generated/`  | **Gitignored.** `move-bindgen generate` writes output here              |
+| `tests/`      | Committed Rust crates that exercise the generated bindings              |
+
+**What's committed vs not:** everything except `generated/`. Configs are
+hand-written and version-controlled; generated bindings are derived from
+configs + Move sources and rebuilt on demand.
 
 ## Dependencies
 
