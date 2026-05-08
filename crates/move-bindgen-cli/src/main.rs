@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use move_binary_format::file_format::Visibility;
-use move_bindgen::Bindings;
+use move_bindgen::{config_path_in, Bindings, Config, OutputFormat};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -38,6 +38,22 @@ enum Cmd {
         #[arg(long, default_value = "../../crates/move-bindgen-runtime")]
         runtime_path: String,
     },
+    /// Load and validate a `move-bindgen.toml`. No code is written; this
+    /// surfaces parse / shape / uniqueness errors and prints a summary of
+    /// the resolved config.
+    ///
+    /// `--input-folder` is repeatable. Each `[packages.*].path` is
+    /// resolved against each input folder in order; first hit wins.
+    /// Defaults to the config file's directory if no input folders are
+    /// passed.
+    Check {
+        /// Path to the config file. Defaults to `./move-bindgen.toml`.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Where to look for the Move packages referenced by `[packages.*].path`.
+        #[arg(long = "input-folder")]
+        input_folders: Vec<PathBuf>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -59,6 +75,49 @@ fn main() -> anyhow::Result<()> {
             write_crate(&out_dir, &crate_)?;
             eprintln!("wrote crate to {}", out_dir.display());
         }
+        Cmd::Check {
+            config,
+            input_folders,
+        } => {
+            let config_path =
+                config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
+            let cfg = Config::load(&config_path)?;
+            check_config(&cfg, &input_folders)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_config(cfg: &Config, input_folders: &[PathBuf]) -> anyhow::Result<()> {
+    println!("config: ok");
+    println!(
+        "  format:           {}",
+        match cfg.format {
+            OutputFormat::SingleCrate => "single-crate",
+            OutputFormat::Workspace => "workspace",
+        }
+    );
+    if let Some(name) = &cfg.output_name {
+        println!("  output name:      {}", name);
+    }
+    println!("  runtime:          {:?}", cfg.runtime);
+    println!(
+        "  framework pkgs:   {}",
+        cfg.framework_packages
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    println!("  packages ({}):", cfg.packages.len());
+    for p in &cfg.packages {
+        let resolved = cfg.resolve_package_path(p, input_folders)?;
+        println!(
+            "    [{:>20}]  crate={:<28} path={}",
+            p.id,
+            p.crate_name(),
+            resolved.display()
+        );
     }
     Ok(())
 }
