@@ -191,6 +191,8 @@ pub enum OracleError {
     Backend(String),
     #[error("no gas coins available for {0}")]
     NoGasCoins(Address),
+    #[error("oracle does not support `{0}`")]
+    Unsupported(&'static str),
 }
 
 pub type ListGasCoinsFuture<'a> =
@@ -198,6 +200,8 @@ pub type ListGasCoinsFuture<'a> =
 pub type RefGasPriceFuture<'a> =
     Pin<Box<dyn Future<Output = Result<u64, OracleError>> + Send + 'a>>;
 pub type SuggestBudgetFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<u64, OracleError>> + Send + 'a>>;
+pub type DryRunEstimateFuture<'a> =
     Pin<Box<dyn Future<Output = Result<u64, OracleError>> + Send + 'a>>;
 
 /// Backend capability the [`PtbBuilder`] uses to fill in gas slots
@@ -207,10 +211,15 @@ pub trait GasOracle: Send + Sync {
     fn list_gas_coins<'a>(&'a self, owner: Address) -> ListGasCoinsFuture<'a>;
     /// Network's current reference gas price.
     fn reference_gas_price<'a>(&'a self) -> RefGasPriceFuture<'a>;
-    /// Suggested upper-bound budget for a transaction. Default impls usually
-    /// return a sensible constant; smarter implementations can dry-run for a
-    /// tighter estimate.
+    /// Conservative fallback budget when dry-run isn't viable. Implementations
+    /// usually return a generous constant.
     fn suggest_gas_budget<'a>(&'a self) -> SuggestBudgetFuture<'a>;
+    /// Dry-run `tx` and return the gas it actually used. `PtbBuilder` adds a
+    /// safety margin and uses this when `with_auto_gas` is on. The default
+    /// returns `Err(OracleError::Unsupported)` so backends can opt in.
+    fn dry_run_estimate<'a>(&'a self, _tx: &'a Transaction) -> DryRunEstimateFuture<'a> {
+        Box::pin(async { Err(OracleError::Unsupported("dry_run_estimate")) })
+    }
 }
 
 impl<O: GasOracle + ?Sized> GasOracle for std::sync::Arc<O> {
@@ -223,6 +232,9 @@ impl<O: GasOracle + ?Sized> GasOracle for std::sync::Arc<O> {
     fn suggest_gas_budget<'a>(&'a self) -> SuggestBudgetFuture<'a> {
         O::suggest_gas_budget(self)
     }
+    fn dry_run_estimate<'a>(&'a self, tx: &'a Transaction) -> DryRunEstimateFuture<'a> {
+        O::dry_run_estimate(self, tx)
+    }
 }
 
 impl<O: GasOracle + ?Sized> GasOracle for Box<O> {
@@ -234,6 +246,9 @@ impl<O: GasOracle + ?Sized> GasOracle for Box<O> {
     }
     fn suggest_gas_budget<'a>(&'a self) -> SuggestBudgetFuture<'a> {
         O::suggest_gas_budget(self)
+    }
+    fn dry_run_estimate<'a>(&'a self, tx: &'a Transaction) -> DryRunEstimateFuture<'a> {
+        O::dry_run_estimate(self, tx)
     }
 }
 
@@ -367,7 +382,7 @@ pub enum SignError {
 pub type SignFuture<'a> =
     Pin<Box<dyn Future<Output = Result<UserSignature, SignError>> + Send + 'a>>;
 
-/// Dyn-compatible wrapper around `iota-sdk-crypto`'s sync [`IotaSigner`]. The
+/// Dyn-compatible wrapper around `iota-sdk-crypto`'s sync `IotaSigner`. The
 /// blanket impl lets any `T: IotaSigner + Send + Sync` (e.g. `Ed25519PrivateKey`)
 /// be stored as `Box<dyn DynSigner>`. We use the sync trait rather than the
 /// async [`TransactionSigner`] because the latter's returned future isn't
@@ -696,9 +711,33 @@ impl PtbBuilder {
             self.inner.gas_price(oracle.reference_gas_price().await?);
         }
         if !self.gas_budget_set {
-            self.inner.gas_budget(oracle.suggest_gas_budget().await?);
+            // Try a real dry-run-based estimate; fall back to the constant
+            // suggestion if the oracle doesn't support dry-run.
+            let budget = match self.dry_run_budget(oracle).await {
+                Ok(estimated) => estimated,
+                Err(_) => oracle.suggest_gas_budget().await?,
+            };
+            self.inner.gas_budget(budget);
         }
         Ok(())
+    }
+
+    /// Clone `inner`, set a temporary high budget on the clone so it can
+    /// finish into a complete `Transaction`, dry-run it, and return
+    /// `gas_used + ~20% margin`.
+    async fn dry_run_budget(&self, oracle: &(dyn GasOracle + '_)) -> Result<u64, OracleError> {
+        // 1 IOTA in nanos — generous for the simulation. With `skip_checks`
+        // the network usually won't reject this regardless.
+        const SIM_BUDGET: u64 = 1_000_000_000;
+        let mut draft = self.inner.clone();
+        draft.gas_budget(SIM_BUDGET);
+        let tx = draft
+            .finish()
+            .map_err(|e| OracleError::Backend(format!("draft finish: {e}")))?;
+        let gas_used = oracle.dry_run_estimate(&tx).await?;
+        // 20% safety margin, capped at the simulation budget so we never
+        // over-suggest beyond what the user is willing to spend on a sim.
+        Ok(gas_used.saturating_add(gas_used / 5).min(SIM_BUDGET))
     }
 }
 
@@ -832,9 +871,24 @@ impl GasOracle for iota_sdk_graphql_client::Client {
     }
 
     fn suggest_gas_budget<'a>(&'a self) -> SuggestBudgetFuture<'a> {
-        // Generous default upper bound. Real dry-run-based estimation is
-        // future work — see PLAN.md.
+        // Conservative fallback used only when `dry_run_estimate` fails.
         Box::pin(async move { Ok(50_000_000u64) })
+    }
+
+    fn dry_run_estimate<'a>(&'a self, tx: &'a Transaction) -> DryRunEstimateFuture<'a> {
+        Box::pin(async move {
+            let result = self
+                .dry_run_tx(tx, /* skip_checks */ true)
+                .await
+                .map_err(|e| OracleError::Backend(e.to_string()))?;
+            if let Some(err) = result.error {
+                return Err(OracleError::Backend(format!("dry-run aborted: {err}")));
+            }
+            let effects = result
+                .effects
+                .ok_or_else(|| OracleError::Backend("dry-run returned no effects".into()))?;
+            Ok(effects.gas_summary().gas_used())
+        })
     }
 }
 

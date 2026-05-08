@@ -29,11 +29,18 @@ pub fn emit_functions(module: &Module<Identifier>, ctx: &TypeCtx) -> Result<Toke
 
 /// True if the function can be called from off-chain (i.e. as the top-level
 /// `MoveCall` of a PTB).
+///
+/// We skip `Visibility::Friend` deliberately: in bytecode, both Move 2024
+/// `public(package)` and the older `public(friend)` lower to `Friend`, and
+/// neither is reachable from a transaction submitted by an external caller.
+/// Generating a builder for them would compile but always fail at execution.
 fn is_externally_callable(f: &Function<Identifier>) -> bool {
     match f.visibility {
         Visibility::Public => true,
-        Visibility::Friend => false, // package-internal in Move 2024; not callable externally
-        Visibility::Private => f.is_entry, // entry-only fns are off-chain callable
+        Visibility::Friend => false,
+        // `entry` fns are reachable as the entry point of a tx even when
+        // their declared visibility is `private`.
+        Visibility::Private => f.is_entry,
     }
 }
 

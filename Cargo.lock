@@ -4409,9 +4409,11 @@ name = "move-bindgen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bcs",
  "iota-move-build",
  "iota-package-management",
  "move-binary-format",
+ "move-bytecode-source-map",
  "move-core-types",
  "move-package",
  "move-symbol-pool",

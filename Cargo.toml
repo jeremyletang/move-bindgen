@@ -26,8 +26,9 @@ bcs   = "0.1"
 # Bump `IOTA_REV` together below when you want to update.
 iota-move-build         = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 iota-package-management = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
-move-binary-format      = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
-move-bytecode-utils     = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-binary-format       = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-bytecode-source-map = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-bytecode-utils      = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-core-types         = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-package            = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-symbol-pool        = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
