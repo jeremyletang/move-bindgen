@@ -51,12 +51,16 @@ fn emit_struct(
     let used_in_fields = |i: u16| s.fields.iter().any(|f| type_param_is_used(&f.type_, i));
     let g = generics(&phantoms);
 
+    let module_name = module.id.name.as_str();
     let mut field_tokens = TokenStream::new();
     for f in &s.fields {
         let fname = field_ident(f.name.as_str());
         let fty = rust_type(&f.type_, ctx)?;
-        let attr = field_serde_attr(&f.type_);
-        field_tokens.extend(quote! { #attr pub #fname: #fty, });
+        let serde_attr = field_serde_attr(&f.type_);
+        let doc_attr = doc_for(ctx, |d| {
+            d.member(module_name, s.name.as_str(), f.name.as_str())
+        });
+        field_tokens.extend(quote! { #doc_attr #serde_attr pub #fname: #fty, });
     }
     // Any unused param needs PhantomData to keep Rust happy.
     for (i, &phantom) in phantoms.iter().enumerate() {
@@ -74,7 +78,9 @@ fn emit_struct(
     let arg_trait = argument_trait(&s.name, &g, s.abilities);
 
     let decl = &g.decl;
+    let doc_attr = doc_for(ctx, |d| d.item(module_name, s.name.as_str()));
     Ok(quote! {
+        #doc_attr
         #[derive(Clone, Debug, Serialize, Deserialize)]
         pub struct #name #decl {
             #field_tokens
@@ -103,11 +109,15 @@ fn emit_enum(
             .any(|v| v.fields.iter().any(|f| type_param_is_used(&f.type_, i)))
     };
 
+    let module_name = module.id.name.as_str();
     let mut variants = TokenStream::new();
     for v in &e.variants {
         let vname = ident(v.name.as_str());
+        let v_doc = doc_for(ctx, |d| {
+            d.member(module_name, e.name.as_str(), v.name.as_str())
+        });
         if v.fields.is_empty() {
-            variants.extend(quote! { #vname, });
+            variants.extend(quote! { #v_doc #vname, });
         } else if is_positional(&v.fields) {
             let parts: Vec<TokenStream> = v
                 .fields
@@ -118,16 +128,24 @@ fn emit_enum(
                     Ok::<_, anyhow::Error>(quote!(#attr #ty))
                 })
                 .collect::<Result<_>>()?;
-            variants.extend(quote! { #vname( #( #parts ),* ), });
+            variants.extend(quote! { #v_doc #vname( #( #parts ),* ), });
         } else {
             let mut named = TokenStream::new();
             for f in &v.fields {
                 let fname = field_ident(f.name.as_str());
                 let fty = rust_type(&f.type_, ctx)?;
                 let attr = field_serde_attr(&f.type_);
-                named.extend(quote! { #attr #fname: #fty, });
+                let f_doc = doc_for(ctx, |d| {
+                    d.variant_field(
+                        module_name,
+                        e.name.as_str(),
+                        v.name.as_str(),
+                        f.name.as_str(),
+                    )
+                });
+                named.extend(quote! { #f_doc #attr #fname: #fty, });
             }
-            variants.extend(quote! { #vname { #named }, });
+            variants.extend(quote! { #v_doc #vname { #named }, });
         }
     }
     // Phantom / unused params: synthesize a hidden variant carrying PhantomData<T>.
@@ -145,7 +163,9 @@ fn emit_enum(
     let move_type = move_type_impl(&e.name, module, &g);
     let arg_trait = argument_trait(&e.name, &g, e.abilities);
     let decl = &g.decl;
+    let doc_attr = doc_for(ctx, |d| d.item(module_name, e.name.as_str()));
     Ok(quote! {
+        #doc_attr
         #[derive(Clone, Debug, Serialize, Deserialize)]
         pub enum #name #decl {
             #variants
@@ -153,6 +173,17 @@ fn emit_enum(
         #move_type
         #arg_trait
     })
+}
+
+/// Build per-line `#[doc = "..."]` attributes (so prettyplease renders them
+/// as `///` lines) — empty tokens if no doc is set.
+fn doc_for<F>(ctx: &TypeCtx, lookup: F) -> TokenStream
+where
+    F: FnOnce(&crate::DocMap) -> Option<&str>,
+{
+    lookup(ctx.docs)
+        .map(crate::codegen::outer_doc)
+        .unwrap_or_default()
 }
 
 // -----------------------------------------------------------------------------

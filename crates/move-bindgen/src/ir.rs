@@ -11,6 +11,7 @@ use move_binary_format::normalized::{self, NoPool};
 use move_core_types::{account_address::AccountAddress, identifier::Identifier};
 
 use crate::build::{build_package, BuildOptions};
+use crate::docs::{self, DocMap};
 
 /// Per-module: constant-pool index → source-level constant name.
 ///
@@ -37,6 +38,9 @@ pub struct Bindings {
     /// Parallel to `modules`. Indexed the same way as
     /// `module.constants` — see [`ConstantNames`].
     pub constant_names: Vec<ConstantNames>,
+    /// Source-level `///` doc comments, keyed by module/item/field. Empty
+    /// if the package's `sources/` directory is missing or has no docs.
+    pub docs: DocMap,
 }
 
 /// Build `path` and produce the IR.
@@ -72,11 +76,14 @@ pub fn load_package_with_options(path: &Path, opts: &BuildOptions) -> Result<Bin
         constant_names.push(names);
     }
 
+    let docs = docs::collect(&path.join("sources"))?;
+
     Ok(Bindings {
         package_name,
         published_at,
         modules,
         constant_names,
+        docs,
     })
 }
 

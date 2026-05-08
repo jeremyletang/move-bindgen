@@ -155,14 +155,20 @@ fn emit_function(
         }
     };
 
-    let doc_attr = if return_doc.is_empty() {
-        TokenStream::new()
-    } else {
-        quote!(#[doc = #return_doc])
-    };
+    let source_doc = ctx.docs.item(module_name, fn_name);
+    let mut doc_attrs = TokenStream::new();
+    if let Some(src) = source_doc {
+        doc_attrs.extend(crate::codegen::outer_doc(src));
+    }
+    if !return_doc.is_empty() {
+        if source_doc.is_some() {
+            doc_attrs.extend(quote!(#[doc = ""]));
+        }
+        doc_attrs.extend(quote!(#[doc = #return_doc]));
+    }
 
     Ok(quote! {
-        #doc_attr
+        #doc_attrs
         pub async fn #fn_ident #generics_decl (
             b: &mut PtbBuilder
             #params_decl

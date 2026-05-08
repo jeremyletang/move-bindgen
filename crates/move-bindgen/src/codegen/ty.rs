@@ -30,6 +30,9 @@ pub struct TypeCtx<'a> {
     /// Module currently being emitted (so we can collapse `super::self::X`
     /// to bare `X`).
     pub current_module: &'a Identifier,
+    /// Source-level doc comments, queried by codegen to attach `#[doc =
+    /// "..."]` to generated items.
+    pub docs: &'a crate::DocMap,
 }
 
 /// Resolve a Move type to the Rust tokens for the type position.
