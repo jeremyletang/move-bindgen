@@ -81,8 +81,8 @@ jobs:
         # `Cargo.lock` to lock against.
         run: |
           ./target/debug/move-bindgen generate examples/counter
-          cd examples/counter-rs && cargo check
-          cd examples/counter-smoke && cargo test
+          (cd examples/counter-rs && cargo check)
+          (cd examples/counter-smoke && cargo test)
 
       - name: sccache stats (after build)
         run: sccache --show-stats
