@@ -26,10 +26,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let counter: Counter = client.get_object(counter_id).await?;
     println!("counter (before): {counter:#?}");
 
-    bump_counter(&client, &private_key, counter_id).await?;
+    let effects = bump_counter(&client, &private_key, counter_id).await?;
 
-    // GraphQL indexer lags a bit behind execution; wait before re-reading.
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    // Block until the indexer has ingested the new state of every changed
+    // object in `effects`, so the next `get_object` doesn't race the indexer.
+    client
+        .wait_for_effects(&effects, WaitOptions::default())
+        .await?;
 
     let counter: Counter = client.get_object(counter_id).await?;
     println!("counter (after):  {counter:#?}");
@@ -41,7 +44,7 @@ async fn bump_counter(
     client: &Client,
     private_key: &str,
     counter_id: ObjectId,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<TransactionEffects, Box<dyn std::error::Error>> {
     let signer = Ed25519PrivateKey::from_bech32(private_key)?;
     let sender = signer.public_key().derive_address();
 
@@ -60,5 +63,5 @@ async fn bump_counter(
     println!("tx digest: {}", effects.as_v1().transaction_digest);
     println!("effects:   {effects:#?}");
 
-    Ok(())
+    Ok(effects)
 }

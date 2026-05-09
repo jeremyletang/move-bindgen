@@ -10,13 +10,14 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::time::{Duration, Instant};
 
 use iota_sdk_graphql_client::{query_types::ObjectFilter, Client, PaginationFilter};
 use iota_sdk_transaction_builder::types::MoveType;
 use iota_sdk_transaction_builder::unresolved::Argument;
 use iota_sdk_types::{
-    Address, ObjectId, ObjectReference, Owner, StructTag, Transaction, TransactionEffects, TypeTag,
-    UserSignature,
+    Address, ExecutionStatus, Object, ObjectId, ObjectOut, ObjectReference, Owner, StructTag,
+    Transaction, TransactionEffects, TypeTag, UserSignature, Version,
 };
 
 // -----------------------------------------------------------------------------
@@ -463,6 +464,33 @@ pub trait ClientExt {
     async fn get_object<T>(&self, id: ObjectId) -> Result<T, GetError>
     where
         T: MoveType + serde::de::DeserializeOwned;
+
+    /// Block until the indexer reflects every changed object in `effects`.
+    ///
+    /// `execute()` returns once the validators have processed the tx, but the
+    /// GraphQL indexer ingests checkpoints asynchronously, so a subsequent
+    /// `get_object` may briefly serve the *pre-tx* state. Call this between
+    /// `execute()` and any read that depends on the new state.
+    ///
+    /// Errors if the tx didn't succeed or any object hasn't appeared at its
+    /// post-execution version before [`WaitOptions::timeout`].
+    async fn wait_for_effects(
+        &self,
+        effects: &TransactionEffects,
+        opts: WaitOptions,
+    ) -> Result<(), WaitError>;
+
+    /// Like [`ClientExt::wait_for_effects`] for a single object id, returning
+    /// the BCS-decoded object once the indexer is caught up. `id` must appear
+    /// in `effects.changed_objects` and must not be a deletion.
+    async fn wait_for_object<T>(
+        &self,
+        id: ObjectId,
+        effects: &TransactionEffects,
+        opts: WaitOptions,
+    ) -> Result<T, WaitError>
+    where
+        T: MoveType + serde::de::DeserializeOwned;
 }
 
 impl ClientExt for Client {
@@ -475,35 +503,158 @@ impl ClientExt for Client {
             .await
             .map_err(|e| GetError::Backend(e.to_string()))?
             .ok_or(GetError::NotFound(id))?;
+        decode_object_as::<T>(id, &obj)
+    }
 
-        let move_struct = obj.as_struct_opt().ok_or(GetError::NotAStruct { id })?;
+    async fn wait_for_effects(
+        &self,
+        effects: &TransactionEffects,
+        opts: WaitOptions,
+    ) -> Result<(), WaitError> {
+        require_success(effects)?;
+        let deadline = Instant::now() + opts.timeout;
+        // Sequential is fine: indexer ingests one checkpoint at a time, so
+        // once the first id is visible the rest typically are too.
+        for (id, version) in target_versions(effects) {
+            poll_for_version(self, id, version, deadline, opts.interval).await?;
+        }
+        Ok(())
+    }
 
-        let expected = match T::type_tag() {
-            TypeTag::Struct(s) => s,
-            // T isn't a struct type → can't be the contents of an object.
-            _ => {
-                return Err(GetError::TypeMismatch {
-                    id,
-                    expected: Box::new(StructTag::new(
-                        Address::ZERO,
-                        iota_sdk_types::Identifier::new("∅").expect("placeholder"),
-                        iota_sdk_types::Identifier::new("∅").expect("placeholder"),
-                        Vec::new(),
-                    )),
-                    actual: Box::new(move_struct.struct_tag().clone()),
-                });
-            }
-        };
+    async fn wait_for_object<T>(
+        &self,
+        id: ObjectId,
+        effects: &TransactionEffects,
+        opts: WaitOptions,
+    ) -> Result<T, WaitError>
+    where
+        T: MoveType + serde::de::DeserializeOwned,
+    {
+        require_success(effects)?;
+        let version = target_versions(effects)
+            .into_iter()
+            .find(|(oid, _)| *oid == id)
+            .map(|(_, v)| v)
+            .ok_or(WaitError::NotInEffects(id))?;
+        let deadline = Instant::now() + opts.timeout;
+        let obj = poll_for_version(self, id, version, deadline, opts.interval).await?;
+        decode_object_as::<T>(id, &obj).map_err(WaitError::Decode)
+    }
+}
 
-        let actual = move_struct.struct_tag();
-        if &*expected != actual {
-            return Err(GetError::TypeMismatch {
+// -----------------------------------------------------------------------------
+// Wait support
+// -----------------------------------------------------------------------------
+
+/// Tunables for [`ClientExt::wait_for_effects`] / [`ClientExt::wait_for_object`].
+/// `Default` polls every 250ms with a 10s timeout — enough for normal indexer lag.
+#[derive(Clone, Copy, Debug)]
+pub struct WaitOptions {
+    pub interval: Duration,
+    pub timeout: Duration,
+}
+
+impl Default for WaitOptions {
+    fn default() -> Self {
+        Self {
+            interval: Duration::from_millis(250),
+            timeout: Duration::from_secs(10),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WaitError {
+    #[error("transaction did not succeed: {0:?}")]
+    TxFailed(ExecutionStatus),
+    #[error("object {0} is not in transaction effects")]
+    NotInEffects(ObjectId),
+    #[error("timed out waiting for {id} at version {expected}")]
+    Timeout { id: ObjectId, expected: Version },
+    #[error("client backend: {0}")]
+    Backend(String),
+    #[error(transparent)]
+    Decode(#[from] GetError),
+}
+
+fn require_success(effects: &TransactionEffects) -> Result<(), WaitError> {
+    match effects.status() {
+        ExecutionStatus::Success => Ok(()),
+        other => Err(WaitError::TxFailed(other.clone())),
+    }
+}
+
+/// `(id, expected indexer version)` for every non-deletion in `effects`.
+/// `ObjectWrite` entries inherit `lamport_version`; `PackageWrite` carries
+/// its own version. `Missing` (deletion/wrap) is skipped.
+fn target_versions(effects: &TransactionEffects) -> Vec<(ObjectId, Version)> {
+    let v1 = effects.as_v1();
+    let lamport = v1.lamport_version;
+    v1.changed_objects
+        .iter()
+        .filter_map(|ch| match &ch.output_state {
+            ObjectOut::ObjectWrite { .. } => Some((ch.object_id, lamport)),
+            ObjectOut::PackageWrite { version, .. } => Some((ch.object_id, *version)),
+            ObjectOut::Missing => None,
+            _ => None,
+        })
+        .collect()
+}
+
+async fn poll_for_version(
+    client: &Client,
+    id: ObjectId,
+    version: Version,
+    deadline: Instant,
+    interval: Duration,
+) -> Result<Object, WaitError> {
+    loop {
+        match client.object(id, Some(version)).await {
+            Ok(Some(obj)) => return Ok(obj),
+            Ok(None) => {}
+            Err(e) => return Err(WaitError::Backend(e.to_string())),
+        }
+        if Instant::now() >= deadline {
+            return Err(WaitError::Timeout {
                 id,
-                expected,
-                actual: Box::new(actual.clone()),
+                expected: version,
             });
         }
-
-        bcs::from_bytes::<T>(move_struct.contents()).map_err(|source| GetError::Bcs { id, source })
+        tokio::time::sleep(interval).await;
     }
+}
+
+fn decode_object_as<T>(id: ObjectId, obj: &Object) -> Result<T, GetError>
+where
+    T: MoveType + serde::de::DeserializeOwned,
+{
+    let move_struct = obj.as_struct_opt().ok_or(GetError::NotAStruct { id })?;
+
+    let expected = match T::type_tag() {
+        TypeTag::Struct(s) => s,
+        // T isn't a struct type → can't be the contents of an object.
+        _ => {
+            return Err(GetError::TypeMismatch {
+                id,
+                expected: Box::new(StructTag::new(
+                    Address::ZERO,
+                    iota_sdk_types::Identifier::new("∅").expect("placeholder"),
+                    iota_sdk_types::Identifier::new("∅").expect("placeholder"),
+                    Vec::new(),
+                )),
+                actual: Box::new(move_struct.struct_tag().clone()),
+            });
+        }
+    };
+
+    let actual = move_struct.struct_tag();
+    if &*expected != actual {
+        return Err(GetError::TypeMismatch {
+            id,
+            expected,
+            actual: Box::new(actual.clone()),
+        });
+    }
+
+    bcs::from_bytes::<T>(move_struct.contents()).map_err(|source| GetError::Bcs { id, source })
 }

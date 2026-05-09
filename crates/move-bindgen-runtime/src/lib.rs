@@ -37,7 +37,7 @@ pub use move_bindgen_ext::{
     ClientExt, DecodeError, DryRunError, DryRunEstimateFuture, DryRunFuture, DryRunner, FetchError,
     FetchFuture, FetchedObject, Fetcher, FindByTypeFuture, FindError, GasOracle, GetError,
     InspectResult, ListGasCoinsFuture, ObjectTypeFinder, OracleError, RefGasPriceFuture,
-    SubmitError, SubmitFuture, Submitter, SuggestBudgetFuture,
+    SubmitError, SubmitFuture, Submitter, SuggestBudgetFuture, WaitError, WaitOptions,
 };
 pub use primitive_types::U256;
 
