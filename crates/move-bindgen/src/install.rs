@@ -1,18 +1,18 @@
-//! `move-bindgen fetch` — populate the staging directory + write a
-//! [`FetchManifest`].
+//! `move-bindgen install` — populate the staging directory + write an
+//! [`InstallManifest`].
 //!
 //! This is the side-effecting half of the pipeline (network, disk,
 //! Move.toml rewrites). [`generate`] then reads the manifest and produces
 //! Rust code purely from staging. Decoupling the two means generate runs
-//! offline and is repeatable; fetch is the only step that may hit the
+//! offline and is repeatable; install is the only step that may hit the
 //! network.
 //!
-//! For each `[packages.*]` entry the config lists, fetch:
+//! For each `[packages.*]` entry the config lists, install:
 //! 1. Resolves the source to a local on-disk directory
 //!    (`PackageSource::Path` → input-folder lookup; `PackageSource::Git`
 //!    → [`crate::resolve_git_source`] which drives `move-package`'s git
 //!    fetcher).
-//! 2. Copies the source tree to `<staging>/<id>/`, dropping build
+//! 2. Copies the source tree to `<staging>/<basename>/`, dropping build
 //!    artefacts (`build/`, `target/`, `Move.lock`).
 //! 3. Rewrites the staged Move.toml's `[addresses]` block, converting
 //!    literal `"0x0"` placeholders to `"_"` so the generate step's
@@ -21,7 +21,7 @@
 //! 4. Records the package's identity in [`StagedPackage`] (id, Move
 //!    package name, crate name, framework status, source spec).
 //!
-//! Once every listed package is staged, fetch scans every staged
+//! Once every listed package is staged, install scans every staged
 //! Move.toml's `[addresses]` block for `_`-valued names and assigns each
 //! a deterministic synthetic address (`0xff_…`). The resulting map is
 //! baked into the manifest so generate replays it identically across
@@ -34,9 +34,11 @@ use anyhow::{anyhow, Context, Result};
 use move_core_types::account_address::AccountAddress;
 
 use crate::config::{Config, PackageEntry, PackageSource};
-use crate::fetch_manifest::{FetchManifest, SerializableSource, StagedPackage, MANIFEST_VERSION};
+use crate::install_manifest::{
+    InstallManifest, SerializableSource, StagedPackage, MANIFEST_VERSION,
+};
 
-/// Drive a fetch. `config_path` points at the user's `move-bindgen.toml`;
+/// Drive an install. `config_path` points at the user's `move-bindgen.toml`;
 /// `input_folders` are the bases against which `PackageSource::Path`
 /// entries are resolved. Returns the staging root that was populated.
 pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
@@ -87,7 +89,7 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
 
     let address_overrides = build_address_overrides(&staging_root, &staged)?;
 
-    let manifest = FetchManifest {
+    let manifest = InstallManifest {
         version: MANIFEST_VERSION,
         packages: staged,
         address_overrides,
@@ -234,7 +236,7 @@ fn rewrite_zero_address_line(line: &str) -> Option<String> {
     if value_part != "\"0x0\"" {
         return None;
     }
-    Some(format!("{leading_ws}{}= \"_\"", key.trim_end()))
+    Some(format!("{leading_ws}{} = \"_\"", key.trim_end()))
 }
 
 fn read_addresses_block(move_toml: &Path) -> Result<BTreeMap<String, String>> {
@@ -272,10 +274,13 @@ mod tests {
 
     #[test]
     fn synthetic_addresses_are_distinct() {
-        let a = format_hex_address(synthetic_address(1));
-        let b = format_hex_address(synthetic_address(2));
+        let a = format_hex_address(synthetic_address(0xff00_0000_0000_0001));
+        let b = format_hex_address(synthetic_address(0xff00_0000_0000_0002));
         assert_ne!(a, b);
-        assert!(a.starts_with("0xff"));
+        // Canonical hex is 64 chars + `0x`; the synthetic prefix lives in
+        // the low 16 bytes of the address, so the marker shows up near
+        // the end rather than at the start.
+        assert!(a.ends_with("ff00000000000001"));
     }
 
     #[test]

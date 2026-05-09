@@ -36,8 +36,8 @@ enum Cmd {
     ///      one crate at `<package>-rs` (or `--out`). Uses
     ///      `--runtime-path` for the runtime dep in `Cargo.toml`.
     ///   2. Config-driven: pass `--config <toml>`. Reads the staging dir
-    ///      written by `move-bindgen fetch` and emits Rust against it.
-    ///      Errors clearly if `fetch` hasn't run yet.
+    ///      written by `move-bindgen install` and emits Rust against it.
+    ///      Errors clearly if `install` hasn't run yet.
     Generate {
         /// Zero-config: path to a Move package (directory with `Move.toml`).
         #[arg(conflicts_with = "config")]
@@ -76,10 +76,10 @@ enum Cmd {
     },
     /// Resolve every `[packages.*]` entry, copy/clone its source into a
     /// staging directory next to the config, rewrite Move.toml address
-    /// placeholders, and write a `fetch.json` manifest. `move-bindgen
-    /// generate` reads that manifest — fetch is the only step that may
-    /// hit the network.
-    Fetch {
+    /// placeholders, and write a `packages.json` manifest. `move-bindgen
+    /// generate` reads that manifest — install is the only step that
+    /// may hit the network.
+    Install {
         /// Path to the config file. Defaults to `./move-bindgen.toml`.
         #[arg(long)]
         config: Option<PathBuf>,
@@ -117,12 +117,12 @@ fn main() -> anyhow::Result<()> {
             let cfg = Config::load(&config_path)?;
             check_config(&cfg, &input_folders)?;
         }
-        Cmd::Fetch {
+        Cmd::Install {
             config,
             input_folders,
         } => {
             let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
-            move_bindgen::fetch(&config_path, &input_folders)?;
+            move_bindgen::install(&config_path, &input_folders)?;
         }
     }
     Ok(())
@@ -150,7 +150,7 @@ fn generate_zero_config(
 fn generate_with_config(config_path: &Path, out: Option<&Path>) -> anyhow::Result<()> {
     let cfg = Config::load(config_path)?;
     let staging_root = move_bindgen::staging_dir_for(config_path);
-    let manifest = move_bindgen::FetchManifest::load(&staging_root)?;
+    let manifest = move_bindgen::InstallManifest::load(&staging_root)?;
     let overrides = parse_overrides(&manifest.address_overrides)?;
     match cfg.format {
         OutputFormat::SingleCrate => {
@@ -177,7 +177,7 @@ fn parse_overrides(
 fn generate_single_from_staging(
     cfg: &Config,
     staging_root: &Path,
-    manifest: &move_bindgen::FetchManifest,
+    manifest: &move_bindgen::InstallManifest,
     overrides: &BTreeMap<String, AccountAddress>,
     out: Option<&Path>,
 ) -> anyhow::Result<()> {
@@ -215,7 +215,7 @@ fn generate_single_from_staging(
 fn generate_workspace_from_staging(
     cfg: &Config,
     staging_root: &Path,
-    manifest: &move_bindgen::FetchManifest,
+    manifest: &move_bindgen::InstallManifest,
     overrides: &BTreeMap<String, AccountAddress>,
     out: Option<&Path>,
 ) -> anyhow::Result<()> {

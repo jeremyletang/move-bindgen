@@ -1,4 +1,4 @@
-//! On-disk record of a `move-bindgen fetch` run.
+//! On-disk record of a `move-bindgen install` run.
 //!
 //! `fetch` writes one of these into the staging directory; `generate`
 //! reads it to drive codegen without touching the network or the user's
@@ -8,7 +8,7 @@
 //! status).
 //!
 //! Format: pretty-printed JSON. Stable enough for users to read by hand
-//! when debugging — `cat .move-bindgen-exchange/fetch.json` should be
+//! when debugging — `cat .move-bindgen-exchange/packages.json` should be
 //! immediately recognisable.
 
 use std::collections::BTreeMap;
@@ -18,7 +18,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// File the manifest lives at, inside the staging directory.
-pub const MANIFEST_FILENAME: &str = "fetch.json";
+pub const MANIFEST_FILENAME: &str = "packages.json";
 
 /// Bumped when the on-disk schema changes incompatibly. `generate`
 /// errors clearly if it sees a mismatched version (so users learn to
@@ -26,7 +26,7 @@ pub const MANIFEST_FILENAME: &str = "fetch.json";
 pub const MANIFEST_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FetchManifest {
+pub struct InstallManifest {
     pub version: u32,
     /// Packages in stable id order. Each entry carries enough state for
     /// codegen to walk it without consulting the original config or
@@ -86,15 +86,15 @@ pub enum SerializableSource {
     },
 }
 
-impl FetchManifest {
-    /// Read the manifest from `<staging_root>/fetch.json`. Errors if
+impl InstallManifest {
+    /// Read the manifest from `<staging_root>/packages.json`. Errors if
     /// the file is missing (asks the user to run `fetch`) or if the
     /// version is incompatible.
     pub fn load(staging_root: &Path) -> Result<Self> {
         let path = staging_root.join(MANIFEST_FILENAME);
         if !path.is_file() {
             bail!(
-                "no fetch manifest at {} — run `move-bindgen fetch` first",
+                "no install manifest at {} — run `move-bindgen install` first",
                 path.display()
             );
         }
@@ -104,7 +104,7 @@ impl FetchManifest {
             serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         if manifest.version != MANIFEST_VERSION {
             bail!(
-                "fetch manifest at {} is version {} but this build expects version {} — re-run `move-bindgen fetch`",
+                "install manifest at {} is version {} but this build expects version {} — re-run `move-bindgen install`",
                 path.display(),
                 manifest.version,
                 MANIFEST_VERSION,
@@ -113,13 +113,13 @@ impl FetchManifest {
         Ok(manifest)
     }
 
-    /// Write the manifest to `<staging_root>/fetch.json`. Pretty-prints
+    /// Write the manifest to `<staging_root>/packages.json`. Pretty-prints
     /// for grep-ability.
     pub fn save(&self, staging_root: &Path) -> Result<()> {
         std::fs::create_dir_all(staging_root)
             .with_context(|| format!("creating {}", staging_root.display()))?;
         let path = staging_root.join(MANIFEST_FILENAME);
-        let text = serde_json::to_string_pretty(self).context("serializing fetch manifest")?;
+        let text = serde_json::to_string_pretty(self).context("serializing install manifest")?;
         std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
         Ok(())
     }
@@ -160,7 +160,7 @@ mod tests {
         let mut overrides = BTreeMap::new();
         overrides.insert("real_markets".into(), "0xff00000000000003".into());
         overrides.insert("fixed18".into(), "0xff00000000000004".into());
-        let m = FetchManifest {
+        let m = InstallManifest {
             version: MANIFEST_VERSION,
             packages: vec![StagedPackage {
                 id: "exchange".into(),
@@ -175,7 +175,7 @@ mod tests {
             address_overrides: overrides,
         };
         let text = serde_json::to_string_pretty(&m).unwrap();
-        let back: FetchManifest = serde_json::from_str(&text).unwrap();
+        let back: InstallManifest = serde_json::from_str(&text).unwrap();
         assert_eq!(back.packages.len(), 1);
         assert_eq!(back.packages[0].id, "exchange");
         assert_eq!(back.address_overrides.len(), 2);
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn round_trip_git_entry() {
-        let m = FetchManifest {
+        let m = InstallManifest {
             version: MANIFEST_VERSION,
             packages: vec![StagedPackage {
                 id: "pyth".into(),
@@ -202,7 +202,7 @@ mod tests {
             address_overrides: BTreeMap::new(),
         };
         let text = serde_json::to_string_pretty(&m).unwrap();
-        let back: FetchManifest = serde_json::from_str(&text).unwrap();
+        let back: InstallManifest = serde_json::from_str(&text).unwrap();
         match &back.packages[0].source {
             SerializableSource::Git {
                 url, rev, subdir, ..
@@ -223,7 +223,7 @@ mod tests {
             "version": 99,
             "packages": []
         });
-        let parsed: FetchManifest = serde_json::from_value(bad).unwrap();
+        let parsed: InstallManifest = serde_json::from_value(bad).unwrap();
         assert_eq!(parsed.version, 99);
         // The filesystem-coupled error path is exercised manually via
         // the `move-bindgen generate` flow when staging is stale.
