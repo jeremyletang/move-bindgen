@@ -22,6 +22,7 @@ move-bindgen-ext     = { path = "crates/move-bindgen-ext" }
 
 # Used by both the runtime and generated code
 serde           = { version = "1", features = ["derive"] }
+serde_json      = "1"
 bcs             = "0.1"
 primitive-types = { version = "0.14", features = ["impl-serde"] }
 
@@ -35,6 +36,7 @@ move-bytecode-utils      = { git = "https://github.com/iotaledger/iota.git", rev
 move-core-types         = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-package            = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 move-symbol-pool        = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
+move-command-line-common = { git = "https://github.com/iotaledger/iota.git", rev = "555e20ec91" }
 
 # Sibling SDK — canonical client-side surface (PTB types + builder).
 iota-sdk-types               = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }

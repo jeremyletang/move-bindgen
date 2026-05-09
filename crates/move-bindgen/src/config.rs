@@ -58,11 +58,27 @@ pub struct PackageEntry {
     /// Stable identifier from the `[packages.<id>]` key. Used in error
     /// messages; not necessarily the Move package name.
     pub id: String,
-    /// Path as written in the TOML — relative, unresolved.
-    pub raw_path: PathBuf,
-    /// Override for the generated crate name. Default: kebab(basename of
-    /// `raw_path`) + `"-rs"`.
+    /// How the package source is fetched / located.
+    pub source: PackageSource,
+    /// Override for the generated crate name. Default derived from the
+    /// source — basename of the path, or basename of the git subdir.
     pub crate_name_override: Option<String>,
+}
+
+/// Where the Move source for a `[packages.X]` entry lives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageSource {
+    /// Local directory. Resolved against `--input-folder`s.
+    Path(PathBuf),
+    /// Remote git repository. `move-package`'s fetcher handles cloning
+    /// into `~/.move/` and gives us the on-disk path.
+    Git {
+        url: String,
+        rev: Option<String>,
+        branch: Option<String>,
+        tag: Option<String>,
+        subdir: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -98,14 +114,40 @@ impl Config {
         Self::from_raw(raw, config_dir)
     }
 
-    /// Resolve a `[packages.*].raw_path` against the supplied input
-    /// folders. First match wins. Errors if none of them contain a
-    /// `Move.toml` at the given relative path.
-    pub fn resolve_package_path(
+    /// Resolve any `[packages.*]` entry's source to a local on-disk
+    /// directory containing `Move.toml`. Dispatches to the path
+    /// resolver (input-folder lookup) or the git resolver (drives
+    /// `move-package`'s fetcher) depending on the source variant.
+    pub fn resolve_source(
+        &self,
+        entry: &PackageEntry,
+        input_folders: &[PathBuf],
+        scratch_root: &Path,
+    ) -> Result<PathBuf> {
+        match &entry.source {
+            PackageSource::Path(_) => self.resolve_path_source(entry, input_folders),
+            PackageSource::Git { .. } => crate::git_resolver::resolve_git_source(
+                &entry.source,
+                &scratch_root.join(&entry.id),
+            ),
+        }
+    }
+
+    /// Path-only variant. Errors if the entry is git-sourced.
+    pub fn resolve_path_source(
         &self,
         entry: &PackageEntry,
         input_folders: &[PathBuf],
     ) -> Result<PathBuf> {
+        let raw_path = match &entry.source {
+            PackageSource::Path(p) => p,
+            PackageSource::Git { .. } => {
+                bail!(
+                    "package '{}' has a git source — resolve via the git resolver, not resolve_path_source",
+                    entry.id
+                );
+            }
+        };
         let candidates: Vec<PathBuf> = if input_folders.is_empty() {
             vec![self.config_dir.clone()]
         } else {
@@ -113,7 +155,7 @@ impl Config {
         };
         let mut tried = Vec::new();
         for base in &candidates {
-            let candidate = base.join(&entry.raw_path);
+            let candidate = base.join(raw_path);
             if candidate.join("Move.toml").is_file() {
                 return Ok(candidate);
             }
@@ -165,9 +207,10 @@ impl Config {
                     );
                 }
                 let p = raw.package.unwrap();
+                let source = PackageSource::from_raw("package", &p)?;
                 packages.push(PackageEntry {
                     id: "package".to_string(),
-                    raw_path: PathBuf::from(p.path),
+                    source,
                     crate_name_override: p.crate_name,
                 });
             }
@@ -183,9 +226,10 @@ impl Config {
                     );
                 }
                 for (id, raw_pkg) in raw.packages {
+                    let source = PackageSource::from_raw(&id, &raw_pkg)?;
                     packages.push(PackageEntry {
                         id,
-                        raw_path: PathBuf::from(raw_pkg.path),
+                        source,
                         crate_name_override: raw_pkg.crate_name,
                     });
                 }
@@ -193,7 +237,7 @@ impl Config {
             }
         }
 
-        validate_unique_paths(&packages)?;
+        validate_unique_sources(&packages)?;
         validate_unique_crate_names(&packages)?;
 
         // Workspace mode has no obvious default for the output dir name —
@@ -214,13 +258,29 @@ impl Config {
     }
 }
 
-/// Default crate name for a package: kebab-cased basename of `raw_path` +
-/// `"-rs"`. Falls back to `package-rs` if the path has no usable basename.
-pub fn default_crate_name(raw_path: &Path) -> String {
-    let stem = raw_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("package");
+/// Default crate name for a package: kebab-cased basename of the
+/// source's "leaf" path component + `"-rs"`. For `Path` sources that's
+/// the directory's basename; for `Git` sources it's the basename of
+/// `subdir` (or the URL's repo segment if no subdir). Falls back to
+/// `package-rs` if nothing usable can be extracted.
+pub fn default_crate_name(source: &PackageSource) -> String {
+    let stem = match source {
+        PackageSource::Path(p) => p.file_name().and_then(|s| s.to_str()).map(str::to_string),
+        PackageSource::Git { url, subdir, .. } => {
+            if let Some(s) = subdir.as_deref() {
+                Path::new(s)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(str::to_string)
+            } else {
+                // Last segment of the URL, stripping `.git`.
+                url.rsplit('/')
+                    .find(|s| !s.is_empty())
+                    .map(|s| s.trim_end_matches(".git").to_string())
+            }
+        }
+    };
+    let stem = stem.unwrap_or_else(|| "package".to_string());
     let kebab: String = stem
         .chars()
         .map(|c| {
@@ -236,11 +296,57 @@ pub fn default_crate_name(raw_path: &Path) -> String {
 
 impl PackageEntry {
     /// Effective crate name: explicit override if set, otherwise
-    /// [`default_crate_name`].
+    /// [`default_crate_name`] derived from the source.
     pub fn crate_name(&self) -> String {
         self.crate_name_override
             .clone()
-            .unwrap_or_else(|| default_crate_name(&self.raw_path))
+            .unwrap_or_else(|| default_crate_name(&self.source))
+    }
+}
+
+impl PackageSource {
+    fn from_raw(id: &str, raw: &RawPackage) -> Result<Self> {
+        let kinds = [
+            raw.path.is_some().then_some("path"),
+            raw.git.is_some().then_some("git"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if kinds.is_empty() {
+            bail!("package '{id}' must specify either `path` or `git` as its source");
+        }
+        if kinds.len() > 1 {
+            bail!(
+                "package '{id}' sets multiple sources ({}); pick exactly one",
+                kinds.join(", ")
+            );
+        }
+        if let Some(p) = &raw.path {
+            return Ok(PackageSource::Path(PathBuf::from(p)));
+        }
+        let url = raw.git.clone().expect("git is set");
+        let kinds = [
+            raw.rev.is_some().then_some("rev"),
+            raw.branch.is_some().then_some("branch"),
+            raw.tag.is_some().then_some("tag"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if kinds.len() > 1 {
+            bail!(
+                "package '{id}' git source sets multiple of rev/branch/tag ({}); pick at most one",
+                kinds.join(", ")
+            );
+        }
+        Ok(PackageSource::Git {
+            url,
+            rev: raw.rev.clone(),
+            branch: raw.branch.clone(),
+            tag: raw.tag.clone(),
+            subdir: raw.subdir.clone(),
+        })
     }
 }
 
@@ -335,7 +441,18 @@ impl RuntimeSpec {
 
 #[derive(Debug, Deserialize)]
 struct RawPackage {
-    path: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    git: Option<String>,
+    #[serde(default)]
+    rev: Option<String>,
+    #[serde(default)]
+    branch: Option<String>,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    subdir: Option<String>,
     #[serde(default)]
     crate_name: Option<String>,
 }
@@ -344,19 +461,39 @@ struct RawPackage {
 // Validation helpers
 // -----------------------------------------------------------------------------
 
-fn validate_unique_paths(packages: &[PackageEntry]) -> Result<()> {
-    let mut seen: BTreeMap<&Path, &str> = BTreeMap::new();
+fn validate_unique_sources(packages: &[PackageEntry]) -> Result<()> {
+    let mut seen: BTreeMap<String, &str> = BTreeMap::new();
     for p in packages {
-        if let Some(prev) = seen.insert(p.raw_path.as_path(), &p.id) {
+        let key = source_key(&p.source);
+        if let Some(prev) = seen.insert(key.clone(), &p.id) {
             bail!(
-                "packages '{}' and '{}' both point at path '{}'",
+                "packages '{}' and '{}' both point at the same source ({})",
                 prev,
                 p.id,
-                p.raw_path.display()
+                key
             );
         }
     }
     Ok(())
+}
+
+fn source_key(s: &PackageSource) -> String {
+    match s {
+        PackageSource::Path(p) => format!("path:{}", p.display()),
+        PackageSource::Git {
+            url,
+            rev,
+            branch,
+            tag,
+            subdir,
+        } => format!(
+            "git:{url}#{}#{}#{}#{}",
+            rev.as_deref().unwrap_or(""),
+            branch.as_deref().unwrap_or(""),
+            tag.as_deref().unwrap_or(""),
+            subdir.as_deref().unwrap_or(""),
+        ),
+    }
 }
 
 fn validate_unique_crate_names(packages: &[PackageEntry]) -> Result<()> {
@@ -379,6 +516,49 @@ fn validate_unique_crate_names(packages: &[PackageEntry]) -> Result<()> {
 /// canonical config file inside it.
 pub fn config_path_in(dir: &Path) -> PathBuf {
     dir.join(CONFIG_FILE_NAME)
+}
+
+/// Staging directory convention: `<config-dir>/.move-bindgen-<stem>/`.
+/// `<stem>` is the config file's basename without the `.toml` suffix
+/// (e.g. `configs/exchange.toml` → `.move-bindgen-exchange`). Configs
+/// named exactly `move-bindgen.toml` produce `.move-bindgen-staging`
+/// (the unsuffixed basename collides too closely with the convention).
+pub fn staging_dir_for(config_path: &Path) -> PathBuf {
+    let dir = config_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let stem = config_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("staging");
+    let stem = if stem == "move-bindgen" {
+        "staging"
+    } else {
+        stem
+    };
+    dir.join(format!(".move-bindgen-{stem}"))
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::*;
+
+    #[test]
+    fn staging_dir_basics() {
+        assert_eq!(
+            staging_dir_for(Path::new("configs/exchange.toml")),
+            PathBuf::from("configs/.move-bindgen-exchange"),
+        );
+        assert_eq!(
+            staging_dir_for(Path::new("configs/counter.toml")),
+            PathBuf::from("configs/.move-bindgen-counter"),
+        );
+        assert_eq!(
+            staging_dir_for(Path::new("./move-bindgen.toml")),
+            PathBuf::from("./.move-bindgen-staging"),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -489,6 +669,7 @@ mod tests {
             r#"
             [output]
             format = "workspace"
+            name   = "ws"
             runtime = { path = "../runtime" }
 
             [packages.a]
@@ -499,7 +680,76 @@ mod tests {
             "#,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("both point at path"), "{err}");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("both point at the same source"), "{msg}");
+    }
+
+    #[test]
+    fn package_must_have_path_or_git() {
+        let err = parse(
+            r#"
+            [output]
+            format = "workspace"
+            name   = "ws"
+            runtime = { path = "../runtime" }
+
+            [packages.foo]
+            crate_name = "foo-rs"
+            "#,
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("must specify either `path` or `git`"), "{msg}");
+    }
+
+    #[test]
+    fn package_rejects_path_and_git_together() {
+        let err = parse(
+            r#"
+            [output]
+            format = "workspace"
+            name   = "ws"
+            runtime = { path = "../runtime" }
+
+            [packages.foo]
+            path = "foo"
+            git  = "https://example.com/foo.git"
+            "#,
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("multiple sources"), "{msg}");
+    }
+
+    #[test]
+    fn package_git_loads() {
+        let cfg = parse(
+            r#"
+            [output]
+            format = "workspace"
+            name   = "ws"
+            runtime = { path = "../runtime" }
+
+            [packages.pyth]
+            git    = "https://github.com/pyth-network/pyth-crosschain.git"
+            rev    = "iota-contract-testnet"
+            subdir = "target_chains/sui/contracts"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.packages.len(), 1);
+        match &cfg.packages[0].source {
+            PackageSource::Git {
+                url, rev, subdir, ..
+            } => {
+                assert_eq!(url, "https://github.com/pyth-network/pyth-crosschain.git");
+                assert_eq!(rev.as_deref(), Some("iota-contract-testnet"));
+                assert_eq!(subdir.as_deref(), Some("target_chains/sui/contracts"));
+            }
+            other => panic!("expected Git source, got {other:?}"),
+        }
+        // Default crate name = kebab(basename of subdir) + -rs.
+        assert_eq!(cfg.packages[0].crate_name(), "contracts-rs");
     }
 
     #[test]
@@ -581,10 +831,16 @@ mod tests {
     #[test]
     fn default_crate_name_kebabs_underscores() {
         assert_eq!(
-            default_crate_name(Path::new("oracle_price_feed")),
+            default_crate_name(&PackageSource::Path(PathBuf::from("oracle_price_feed"))),
             "oracle-price-feed-rs"
         );
-        assert_eq!(default_crate_name(Path::new("Counter")), "counter-rs");
-        assert_eq!(default_crate_name(Path::new("packages/foo")), "foo-rs");
+        assert_eq!(
+            default_crate_name(&PackageSource::Path(PathBuf::from("Counter"))),
+            "counter-rs"
+        );
+        assert_eq!(
+            default_crate_name(&PackageSource::Path(PathBuf::from("packages/foo"))),
+            "foo-rs"
+        );
     }
 }

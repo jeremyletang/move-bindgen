@@ -143,7 +143,7 @@ fn generate_with_config(
                 .packages
                 .first()
                 .expect("validator guarantees one entry in single-crate mode");
-            let pkg_path = cfg.resolve_package_path(entry, input_folders)?;
+            let pkg_path = cfg.resolve_path_source(entry, input_folders)?;
             let bindings = move_bindgen::load_package(&pkg_path)?;
             // Default name = `<entry crate name>` (e.g. `counter-rs`).
             let out_name = cfg
@@ -221,7 +221,7 @@ fn generate_workspace(
     let mut next_synth: u128 = 0xff00_0000_0000_0001;
     let mut resolved_paths: Vec<std::path::PathBuf> = Vec::with_capacity(cfg.packages.len());
     for entry in &cfg.packages {
-        let pkg_path = cfg.resolve_package_path(entry, &staged_inputs_owned)?;
+        let pkg_path = cfg.resolve_path_source(entry, &staged_inputs_owned)?;
         let move_toml = pkg_path.join("Move.toml");
         rewrite_addresses_to_underscore(&move_toml)?;
         let names = read_addresses_block(&move_toml)?;
@@ -571,12 +571,20 @@ fn check_config(cfg: &Config, input_folders: &[PathBuf]) -> anyhow::Result<()> {
     );
     println!("  packages ({}):", cfg.packages.len());
     for p in &cfg.packages {
-        let resolved = cfg.resolve_package_path(p, input_folders)?;
+        let summary: String = match &p.source {
+            move_bindgen::PackageSource::Path(_) => cfg
+                .resolve_path_source(p, input_folders)?
+                .display()
+                .to_string(),
+            move_bindgen::PackageSource::Git { url, rev, .. } => {
+                format!("git:{url} (rev {})", rev.as_deref().unwrap_or("<default>"))
+            }
+        };
         println!(
-            "    [{:>20}]  crate={:<28} path={}",
+            "    [{:>20}]  crate={:<28} {}",
             p.id,
             p.crate_name(),
-            resolved.display()
+            summary
         );
     }
     Ok(())

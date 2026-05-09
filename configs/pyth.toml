@@ -1,0 +1,23 @@
+# Workspace bindings driven entirely by a single git source.
+#
+# Forward-looking — exercises the upcoming auto-discovery + native
+# `[packages.X] git = ...` paths. With those landed:
+#   - `move-bindgen` resolves Pyth via `move-package`'s git fetcher.
+#   - Pyth's `[dependencies]` (Iota at minimum) auto-resolve as peer
+#     crates from its Move.toml via `ResolvedGraph` walk.
+#   - Output is a Cargo workspace with `pyth-rs`, `iota-framework-rs`,
+#     `move-stdlib-rs` (the latter two get the framework skip-list).
+#
+# Usage (once landed):
+#   cargo run -p move-bindgen-cli -- generate --config configs/pyth.toml \
+#       -o generated/pyth-rs
+
+[output]
+format  = "workspace"
+name    = "pyth-rs"
+runtime = { path = "../crates/move-bindgen-runtime" }
+
+[packages.pyth]
+git    = "https://github.com/pyth-network/pyth-crosschain.git"
+rev    = "iota-contract-testnet"
+subdir = "target_chains/sui/contracts"
