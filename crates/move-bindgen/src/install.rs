@@ -297,11 +297,7 @@ fn resolve_item_source(item: &WorkItem, staging_root: &Path) -> Result<PathBuf> 
             // their parent's source dir. Either way `p` should already
             // be absolute and point at a real Move package.
             if !p.join("Move.toml").is_file() {
-                bail!(
-                    "{} has no Move.toml ({})",
-                    p.display(),
-                    item.origin,
-                );
+                bail!("{} has no Move.toml ({})", p.display(), item.origin,);
             }
             Ok(p.clone())
         }
@@ -429,8 +425,8 @@ fn rewrite_staged_manifest(
 ) -> Result<()> {
     let text = std::fs::read_to_string(staged_move_toml)
         .with_context(|| format!("reading {}", staged_move_toml.display()))?;
-    let mut v: toml::Value = toml::from_str(&text)
-        .with_context(|| format!("parsing {}", staged_move_toml.display()))?;
+    let mut v: toml::Value =
+        toml::from_str(&text).with_context(|| format!("parsing {}", staged_move_toml.display()))?;
     let table = v.as_table_mut().ok_or_else(|| {
         anyhow!(
             "{}: top-level Move.toml is not a table",
@@ -441,7 +437,10 @@ fn rewrite_staged_manifest(
     table.remove("dev-dependencies");
     table.remove("dev-addresses");
 
-    if let Some(addrs) = table.get_mut("addresses").and_then(toml::Value::as_table_mut) {
+    if let Some(addrs) = table
+        .get_mut("addresses")
+        .and_then(toml::Value::as_table_mut)
+    {
         for (_name, val) in addrs.iter_mut() {
             if val.as_str() == Some("0x0") {
                 *val = toml::Value::String("_".into());
@@ -635,10 +634,8 @@ mod tests {
         //   <root>/fixed18/          (a "staged" sibling for the fixed18 dep)
         // The parent's [dependencies] reference these via paths relative
         // to its ORIGINAL source dir, which we simulate as <root>/orig/.
-        let root = std::env::temp_dir().join(format!(
-            "move-bindgen-rewrite-test-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("move-bindgen-rewrite-test-{}", std::process::id()));
         if root.exists() {
             std::fs::remove_dir_all(&root).unwrap();
         }
@@ -677,7 +674,10 @@ test = "0x10"
         let iota_canon = std::fs::canonicalize(root.join("iota-framework")).unwrap();
         let fixed_canon = std::fs::canonicalize(root.join("fixed18")).unwrap();
         let mut bases: BTreeMap<String, String> = BTreeMap::new();
-        bases.insert(format!("path:{}", iota_canon.display()), "iota-framework".into());
+        bases.insert(
+            format!("path:{}", iota_canon.display()),
+            "iota-framework".into(),
+        );
         bases.insert(format!("path:{}", fixed_canon.display()), "fixed18".into());
 
         // The parent's "original source dir" — relative deps in its
@@ -692,7 +692,10 @@ test = "0x10"
         let table = parsed.as_table().unwrap();
 
         assert!(table.get("dev-dependencies").is_none(), "dev-deps stripped");
-        assert!(table.get("dev-addresses").is_none(), "dev-addresses stripped");
+        assert!(
+            table.get("dev-addresses").is_none(),
+            "dev-addresses stripped"
+        );
 
         let addrs = table["addresses"].as_table().unwrap();
         assert_eq!(addrs["parent"].as_str(), Some("_"), "0x0 → _");
