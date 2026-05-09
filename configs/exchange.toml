@@ -15,11 +15,15 @@
 # route references to those into the runtime, and skips emitting the
 # corresponding modules in iota-rs / move-stdlib-rs.
 
+# Override the default ["Iota", "MoveStdlib"] — we list both as peer
+# packages below, so they generate their own crates instead of routing
+# to the runtime. (Must sit at top level, before any [section] header.)
+framework_packages = []
+
 [output]
 format  = "workspace"
 name    = "exchange-rs"
 runtime = { path = "../crates/move-bindgen-runtime" }
-framework_packages = []
 
 [packages.iota]
 path = "packages/iota-framework"

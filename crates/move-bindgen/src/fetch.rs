@@ -50,10 +50,26 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
     std::fs::create_dir_all(&staging_root)
         .with_context(|| format!("creating {}", staging_root.display()))?;
 
+    // Stage each package under its source directory's basename — NOT
+    // the [packages.X] id. Move.toml-level relative paths between
+    // packages (e.g. `Iota.local = "../iota-framework"`) need their
+    // targets at the basenames they were authored against, otherwise
+    // move-package's resolver can't find them in staging.
     let mut staged = Vec::with_capacity(cfg.packages.len());
+    let mut used_basenames: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
     for entry in &cfg.packages {
         let source_root = resolve_entry_source(&cfg, entry, input_folders, &staging_root)?;
-        let dest = staging_root.join(&entry.id);
+        let basename = source_basename(&source_root, &entry.id);
+        if let Some(prev) = used_basenames.insert(basename.clone(), entry.id.clone()) {
+            anyhow::bail!(
+                "packages '{}' and '{}' share staging basename '{}' — give one of them a distinct directory",
+                prev,
+                entry.id,
+                basename,
+            );
+        }
+        let dest = staging_root.join(&basename);
         copy_dir_recursive(&source_root, &dest)
             .with_context(|| format!("copying {} to staging", source_root.display()))?;
         rewrite_addresses_to_underscore(&dest.join("Move.toml"))?;
@@ -63,7 +79,7 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
             id: entry.id.clone(),
             move_name,
             crate_name: entry.crate_name(),
-            staged_path: PathBuf::from(&entry.id),
+            staged_path: PathBuf::from(&basename),
             source: SerializableSource::from_config(&entry.source),
             framework,
         });
@@ -84,6 +100,17 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
         staging_root.display()
     );
     Ok(staging_root)
+}
+
+/// Derive the staging directory basename for a package: last path
+/// component of its resolved source directory. Falls back to the
+/// `[packages.X]` id if the source has no usable basename.
+fn source_basename(source_root: &Path, fallback_id: &str) -> String {
+    source_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback_id.to_string())
 }
 
 fn resolve_entry_source(
