@@ -11,6 +11,7 @@
 //! when debugging — `cat .move-bindgen-exchange/fetch.json` should be
 //! immediately recognisable.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -31,6 +32,12 @@ pub struct FetchManifest {
     /// codegen to walk it without consulting the original config or
     /// `move-package`.
     pub packages: Vec<StagedPackage>,
+    /// Named-address overrides applied to every Move build at generate
+    /// time. Built from `_` placeholders in any staged Move.toml's
+    /// `[addresses]`. Synthetic addresses are baked here so fetch +
+    /// generate agree across runs.
+    #[serde(default)]
+    pub address_overrides: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,14 +58,6 @@ pub struct StagedPackage {
     /// Original source spec — kept for diagnostics + future drift
     /// detection between fetch and generate.
     pub source: SerializableSource,
-    /// Resolved Move package address as `0x...`. May be a synthetic
-    /// `0xff_...` for previously-unbound packages, or a real address
-    /// for packages with `published-at` set or framework addresses.
-    pub address: String,
-    /// Immediate dep ids in this manifest (for emitting peer-deps in
-    /// the generated `Cargo.toml`). Excludes framework deps — those
-    /// route into the runtime.
-    pub dependencies: Vec<String>,
     /// True if this entry's modules are owned by `move-bindgen-runtime`
     /// (Iota framework + Move stdlib). No codegen runs for it; refs to
     /// its types route into the runtime via the well-known mapping.
@@ -158,6 +157,9 @@ mod tests {
 
     #[test]
     fn round_trip_path_entry() {
+        let mut overrides = BTreeMap::new();
+        overrides.insert("real_markets".into(), "0xff00000000000003".into());
+        overrides.insert("fixed18".into(), "0xff00000000000004".into());
         let m = FetchManifest {
             version: MANIFEST_VERSION,
             packages: vec![StagedPackage {
@@ -168,16 +170,15 @@ mod tests {
                 source: SerializableSource::Path {
                     path: PathBuf::from("packages/exchange"),
                 },
-                address: "0xff00000000000003".into(),
-                dependencies: vec!["fixed18".into(), "funding".into()],
                 framework: false,
             }],
+            address_overrides: overrides,
         };
         let text = serde_json::to_string_pretty(&m).unwrap();
         let back: FetchManifest = serde_json::from_str(&text).unwrap();
         assert_eq!(back.packages.len(), 1);
         assert_eq!(back.packages[0].id, "exchange");
-        assert_eq!(back.packages[0].dependencies, vec!["fixed18", "funding"]);
+        assert_eq!(back.address_overrides.len(), 2);
     }
 
     #[test]
@@ -196,10 +197,9 @@ mod tests {
                     tag: None,
                     subdir: Some("target_chains/sui/contracts".into()),
                 },
-                address: "0xff00000000000004".into(),
-                dependencies: vec![],
                 framework: false,
             }],
+            address_overrides: BTreeMap::new(),
         };
         let text = serde_json::to_string_pretty(&m).unwrap();
         let back: FetchManifest = serde_json::from_str(&text).unwrap();

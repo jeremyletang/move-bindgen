@@ -9,6 +9,7 @@ mod build;
 mod codegen;
 mod config;
 mod docs;
+mod fetch;
 mod fetch_manifest;
 mod git_resolver;
 mod ir;
@@ -20,6 +21,7 @@ pub use config::{
     config_path_in, staging_dir_for, Config, OutputFormat, PackageEntry, PackageSource, RuntimeSpec,
 };
 pub use docs::DocMap;
+pub use fetch::run as fetch;
 pub use fetch_manifest::{
     FetchManifest, SerializableSource, StagedPackage, MANIFEST_FILENAME, MANIFEST_VERSION,
 };

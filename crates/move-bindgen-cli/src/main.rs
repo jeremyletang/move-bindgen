@@ -78,6 +78,20 @@ enum Cmd {
         #[arg(long = "input-folder")]
         input_folders: Vec<PathBuf>,
     },
+    /// Resolve every `[packages.*]` entry, copy/clone its source into a
+    /// staging directory next to the config, rewrite Move.toml address
+    /// placeholders, and write a `fetch.json` manifest. `move-bindgen
+    /// generate` reads that manifest — fetch is the only step that may
+    /// hit the network.
+    Fetch {
+        /// Path to the config file. Defaults to `./move-bindgen.toml`.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Bases against which `[packages.*].path` entries resolve.
+        /// Repeatable; first hit wins. Defaults to the config dir.
+        #[arg(long = "input-folder")]
+        input_folders: Vec<PathBuf>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -107,6 +121,13 @@ fn main() -> anyhow::Result<()> {
             let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
             let cfg = Config::load(&config_path)?;
             check_config(&cfg, &input_folders)?;
+        }
+        Cmd::Fetch {
+            config,
+            input_folders,
+        } => {
+            let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
+            move_bindgen::fetch(&config_path, &input_folders)?;
         }
     }
     Ok(())

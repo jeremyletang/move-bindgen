@@ -4414,6 +4414,7 @@ dependencies = [
  "iota-package-management",
  "move-binary-format",
  "move-bytecode-source-map",
+ "move-command-line-common",
  "move-core-types",
  "move-package",
  "move-symbol-pool",
