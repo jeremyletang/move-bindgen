@@ -11,6 +11,8 @@ description = "Generate Rust bindings (types + PTB call builders + dev-inspect v
 anyhow.workspace = true
 thiserror.workspace = true
 bcs.workspace = true
+serde.workspace = true
+toml.workspace = true
 
 iota-move-build.workspace          = true
 iota-package-management.workspace  = true

@@ -203,10 +203,12 @@ fn param_bound(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
             Ok(quote!(impl PureVec<#inner_rust>))
         }
         Type::TypeParameter(_) => {
-            // Generic value param — we don't know whether it's a value or
-            // object, so fall back to the SDK's permissive `PTBArgument`.
-            // Loses compile-time per-type safety here; revisit.
-            Ok(quote!(impl PTBArgument))
+            // Generic value param — we don't know whether it's a value
+            // or object. `ArgumentObject<()>` is permissive (accepts
+            // `Argument` / `ObjectId` / `ObjectReference` / `Shared` /
+            // `SharedMut` / `Receiving`) and has `into_argument` so the
+            // body compiles. Loses per-type safety; revisit.
+            Ok(quote!(impl ArgumentObject<()>))
         }
         Type::Reference(_, _) => unreachable!("already unwrapped above"),
         Type::Datatype(dt) => datatype_bound(dt, ctx),
@@ -236,13 +238,18 @@ fn datatype_bound(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStrea
             _ => {}
         }
     }
-    // Well-known iota framework types. `ID` is `copy + drop + store`, so it
-    // can be a value param — route through `PureID`. `UID` has no `drop` and
-    // can't be passed by value, so leave it bailing.
+    // Hand-mapped iota framework types — `ID` is `copy + drop + store`
+    // and routes through the runtime's `PureID` for ergonomics. Anything
+    // else under `iota::object` (UID etc.) gets the permissive
+    // `PTBArgument` fallback: not directly useful from off-chain (you
+    // can't construct a UID externally), but lets generated framework
+    // bindings compile so cross-package type resolution works. Other
+    // framework types fall through to the peer-map lookup below
+    // (`iota_rs::module::ArgumentX`).
     if module_addr == IOTA_ADDRESS && module_name == "object" {
         match type_name {
             "ID" => return Ok(quote!(impl PureID)),
-            _ => bail!("iota::object::{type_name} is not supported as a call-builder parameter"),
+            _ => return Ok(quote!(impl ArgumentObject<()>)),
         }
     }
 
@@ -270,8 +277,26 @@ fn datatype_bound(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStrea
         };
     }
 
+    // Cross-package: route through the peer crate's ArgumentX trait.
+    if let Some(peer) = ctx.peers.lookup(&module_addr) {
+        let crate_ident = format_ident!("{}", peer.crate_name.replace('-', "_"));
+        let mod_ident = format_ident!("{module_name}");
+        let trait_ident = format_ident!("Argument{type_name}");
+        if dt.type_arguments.is_empty() {
+            return Ok(quote!(impl ::#crate_ident::#mod_ident::#trait_ident));
+        }
+        let args: Vec<TokenStream> = dt
+            .type_arguments
+            .iter()
+            .map(|t| rust_type(t, ctx))
+            .collect::<Result<_>>()?;
+        return Ok(quote!(impl ::#crate_ident::#mod_ident::#trait_ident < #( #args ),* >));
+    }
+
     bail!(
-        "external dependency types are not yet supported as call-builder parameters: {}::{}::{}",
+        "type {}::{}::{} is not in the current package, not a known framework type, \
+         and not registered as a peer in the config — add it to `[packages.*]`, \
+         or to `framework_packages` if its types live in `move-bindgen-runtime`",
         module_addr.short_str_lossless(),
         module_name,
         type_name

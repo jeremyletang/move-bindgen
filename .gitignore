@@ -8,7 +8,9 @@ build/
 Move.lock
 .trace
 .coverage_map.mvcov
-examples/counter-rs
+
+# Generated bindings — produced by `move-bindgen generate` against configs/.
+/generated
 
 # Editors / OS
 .DS_Store

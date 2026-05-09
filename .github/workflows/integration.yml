@@ -72,7 +72,7 @@ jobs:
           CARGO_PROFILE_DEV_CODEGEN_UNITS: "16"
 
       - name: Smoke-test — dump example package IR
-        run: ./target/debug/move-bindgen dump examples/counter
+        run: ./target/debug/move-bindgen dump packages/counter
 
       - name: Smoke-test — generate bindings crate and check it
         # `cargo check` is enough: we just need to confirm the generated
@@ -80,9 +80,9 @@ jobs:
         # because the crate is regenerated each run with no committed
         # `Cargo.lock` to lock against.
         run: |
-          ./target/debug/move-bindgen generate examples/counter
-          (cd examples/counter-rs && cargo check)
-          (cd examples/counter-smoke && cargo test)
+          ./target/debug/move-bindgen generate packages/counter -o generated/counter-rs
+          (cd generated/counter-rs && cargo check)
+          (cd tests/counter-smoke && cargo test)
 
       - name: sccache stats (after build)
         run: sccache --show-stats

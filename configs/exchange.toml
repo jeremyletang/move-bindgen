@@ -1,0 +1,71 @@
+# Workspace bindings for the realmarkets/dex monorepo.
+#
+# Usage (from the repo root):
+#   cargo run -p move-bindgen-cli -- check \
+#       --config configs/exchange.toml \
+#       --input-folder ../dex
+#
+# Paths below are repo-relative (i.e. relative to the dex repo root) so the
+# `--input-folder` points at the dex checkout itself.
+#
+# Iota and MoveStdlib are listed as peer packages so cross-package type
+# refs (`iota::balance::Balance`, `iota::table::Table`, …) resolve to a
+# generated `iota-rs` / `move-stdlib-rs` crate. The runtime keeps only
+# the basics (UID, ID, Option, String) — codegen's well-known mappings
+# route references to those into the runtime, and skips emitting the
+# corresponding modules in iota-rs / move-stdlib-rs.
+
+[output]
+format  = "workspace"
+name    = "exchange-rs"
+runtime = { path = "../crates/move-bindgen-runtime" }
+framework_packages = []
+
+[packages.iota]
+path = "packages/iota-framework"
+
+[packages.std]
+path = "packages/move-stdlib"
+
+[packages.account-registry]
+path = "packages/account-registry"
+
+[packages.exchange]
+path = "packages/exchange"
+
+[packages.faucet]
+path = "packages/faucet"
+
+[packages.fixed18]
+path = "packages/fixed18"
+
+[packages.funding]
+path = "packages/funding"
+
+[packages.metadata]
+path = "packages/metadata"
+
+[packages.oracle-mock-source]
+path = "packages/oracle-mock-source"
+
+[packages.oracle-price-feed]
+path = "packages/oracle-price-feed"
+
+# oracle-pyth-source is omitted: it depends on Pyth's git crate which
+# we have no local source for. Add a `[packages.pyth]` entry pointing
+# at a local Pyth checkout if you need bindings for it.
+
+[packages.ring-buffer]
+path = "packages/ring-buffer"
+
+[packages.soul-bound]
+path = "packages/soul-bound"
+
+[packages.stable]
+path = "packages/stable"
+
+[packages.test]
+path = "packages/test"
+
+[packages.tuple]
+path = "packages/tuple"

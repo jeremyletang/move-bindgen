@@ -1,0 +1,16 @@
+# Single-crate bindings for the counter fixture.
+#
+# Usage (from the repo root):
+#   cargo run -p move-bindgen-cli -- check --config configs/counter.toml
+#   # later, once `generate` learns the config path:
+#   cargo run -p move-bindgen-cli -- generate --config configs/counter.toml -o generated/counter-rs
+
+[output]
+format  = "single-crate"
+name    = "counter-rs"
+runtime = { path = "../crates/move-bindgen-runtime" }
+
+[package]
+# Resolved against `--input-folder` (default: this config's directory).
+# `configs/../packages/counter/Move.toml` exists, so no flag needed.
+path = "../packages/counter"

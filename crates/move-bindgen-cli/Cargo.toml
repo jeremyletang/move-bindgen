@@ -12,10 +12,12 @@ name = "move-bindgen"
 path = "src/main.rs"
 
 [dependencies]
-move-bindgen.workspace      = true
+move-bindgen.workspace       = true
 move-binary-format.workspace = true
-anyhow.workspace            = true
-clap.workspace              = true
+move-core-types.workspace    = true
+anyhow.workspace             = true
+clap.workspace               = true
+toml.workspace               = true
 
 [lints]
 workspace = true

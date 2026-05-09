@@ -33,6 +33,11 @@ pub struct TypeCtx<'a> {
     /// Source-level doc comments, queried by codegen to attach `#[doc =
     /// "..."]` to generated items.
     pub docs: &'a crate::DocMap,
+    /// Peer-package address map. Cross-package datatype refs whose
+    /// address is registered here are emitted as `peer_crate::module::Type`.
+    /// Empty in single-crate mode (any non-self / non-framework address
+    /// then errors at codegen).
+    pub peers: &'a crate::PeerMap,
 }
 
 /// Resolve a Move type to the Rust tokens for the type position.
@@ -81,7 +86,10 @@ fn rust_datatype(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
         quote!(< #( #args ),* >)
     };
 
-    // Well-known framework types — short names from the runtime wildcard import.
+    // Hand-mapped iota framework types — small set that the runtime
+    // provides directly (UID, ID). Everything else routes via the peer
+    // map (i.e. the user lists `Iota` as a peer package and a generated
+    // `iota-rs` crate provides the rest). Same for `std::*` below.
     if module_addr == IOTA_ADDRESS && module_name == "object" {
         match type_name {
             "UID" => return Ok(quote!(UID)),
@@ -111,8 +119,18 @@ fn rust_datatype(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
         return Ok(quote!(super::#mod_ident::#type_ident #generics));
     }
 
+    // Cross-package: route through the peer crate.
+    if let Some(peer) = ctx.peers.lookup(&module_addr) {
+        let crate_ident = format_ident!("{}", peer.crate_name.replace('-', "_"));
+        let mod_ident = format_ident!("{module_name}");
+        let type_ident = format_ident!("{type_name}");
+        return Ok(quote!(::#crate_ident::#mod_ident::#type_ident #generics));
+    }
+
     bail!(
-        "external dependency types are not yet supported in codegen: {}::{}::{}",
+        "type {}::{}::{} is not in the current package, not a known framework type, \
+         and not registered as a peer in the config — add it to `[packages.*]`, \
+         or to `framework_packages` if its types live in `move-bindgen-runtime`",
         module_addr.short_str_lossless(),
         module_name,
         type_name
