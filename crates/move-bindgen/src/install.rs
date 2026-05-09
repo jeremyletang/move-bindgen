@@ -161,6 +161,15 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
             });
         }
 
+        // Snapshot the original source for staleness detection. Hashing
+        // happens here (before phase 2) because phase 2 only touches
+        // the staged copy — the original is untouched, so it doesn't
+        // matter when we hash, as long as we hash the original tree.
+        let source_abs_path =
+            std::fs::canonicalize(&source_root).unwrap_or_else(|_| source_root.clone());
+        let source_digest = crate::digest::source_dir_digest(&source_root)
+            .with_context(|| format!("hashing source dir {}", source_root.display()))?;
+
         staged_basenames.insert(key, basename.clone());
         records.push(StagedRecord {
             staged: StagedPackage {
@@ -169,6 +178,8 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
                 crate_name,
                 staged_path: PathBuf::from(&basename),
                 source: SerializableSource::from_config(&item.source),
+                source_abs_path,
+                source_digest,
                 framework,
             },
             source_root,
@@ -197,9 +208,12 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
 
     let staged: Vec<StagedPackage> = records.into_iter().map(|r| r.staged).collect();
     let address_overrides = build_address_overrides(&staging_root, &staged)?;
+    let config_digest = crate::digest::file_digest(config_path)
+        .with_context(|| format!("hashing config {}", config_path.display()))?;
 
     let manifest = InstallManifest {
         version: MANIFEST_VERSION,
+        config_digest,
         packages: staged,
         address_overrides,
     };
@@ -211,6 +225,56 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
         staging_root.display()
     );
     Ok(staging_root)
+}
+
+/// Best-effort staleness check for `generate`. Re-hashes the user's
+/// config + each staged package's *original* source dir and compares
+/// against the digests `install` recorded.
+///
+/// Two failure shapes:
+///   - `move-bindgen.toml` content differs from install — error,
+///     because re-running install will produce different staging
+///     (different package set / paths / git revs).
+///   - One or more package source trees changed since install — error
+///     listing the affected ids.
+///
+/// One non-failure: `source_abs_path` no longer exists (e.g. user
+/// deleted their dex checkout). Skip silently — staging is
+/// self-contained and generate can still build from it. Anyone
+/// deliberately working without the originals on hand is fine; we
+/// only flag drift, not absence.
+pub fn verify_freshness(
+    config_path: &Path,
+    manifest: &crate::install_manifest::InstallManifest,
+) -> Result<()> {
+    let live_config = crate::digest::file_digest(config_path)
+        .with_context(|| format!("hashing {}", config_path.display()))?;
+    if live_config != manifest.config_digest {
+        bail!(
+            "{} has changed since install — re-run `move-bindgen install`",
+            config_path.display()
+        );
+    }
+
+    let mut drifted: Vec<&str> = Vec::new();
+    for pkg in &manifest.packages {
+        if !pkg.source_abs_path.is_dir() {
+            continue;
+        }
+        let live = crate::digest::source_dir_digest(&pkg.source_abs_path)
+            .with_context(|| format!("hashing source for '{}'", pkg.id))?;
+        if live != pkg.source_digest {
+            drifted.push(&pkg.id);
+        }
+    }
+
+    if drifted.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "sources changed since install for: {} — re-run `move-bindgen install`",
+        drifted.join(", ")
+    );
 }
 
 /// One unit of staging work. Listed entries from `move-bindgen.toml`

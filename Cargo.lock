@@ -4410,6 +4410,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bcs",
+ "hex",
  "iota-move-build",
  "iota-package-management",
  "move-binary-format",
@@ -4423,6 +4424,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "syn 2.0.117",
  "thiserror 2.0.18",
  "toml 0.8.23",
