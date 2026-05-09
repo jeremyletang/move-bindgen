@@ -1458,6 +1458,7 @@ dependencies = [
 name = "move-bindgen-ext"
 version = "0.1.0"
 dependencies = [
+ "base64ct",
  "bcs",
  "iota-sdk-graphql-client",
  "iota-sdk-transaction-builder",

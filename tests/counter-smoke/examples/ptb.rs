@@ -12,7 +12,7 @@ use iota_sdk_crypto::{ToFromBech32, ed25519::Ed25519PrivateKey};
 use iota_sdk_graphql_client::Client;
 use move_bindgen_runtime::*;
 
-const COUNTER_ID: &str = "0xc0687778a6eb2c8433017effb3e9d55b4956bd3bc81ab1754ee00a77b0785a1a";
+const COUNTER_ID: &str = "0xf2850c3a3b6a4abccb9602ee454a578ad4f01bafeb492833621f05f72f97fd36";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

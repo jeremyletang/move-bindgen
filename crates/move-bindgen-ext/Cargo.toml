@@ -15,6 +15,7 @@ serde.workspace                        = true
 bcs.workspace                          = true
 thiserror.workspace                    = true
 tokio                                  = { version = "1", features = ["time"] }
+base64ct                               = { version = "1", features = ["alloc"] }
 
 [lints]
 workspace = true

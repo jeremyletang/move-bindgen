@@ -12,12 +12,15 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-use iota_sdk_graphql_client::{query_types::ObjectFilter, Client, PaginationFilter};
+use iota_sdk_graphql_client::{
+    query_types::{EventFilter, ObjectFilter},
+    Client, PaginationFilter,
+};
 use iota_sdk_transaction_builder::types::MoveType;
 use iota_sdk_transaction_builder::unresolved::Argument;
 use iota_sdk_types::{
-    Address, ExecutionStatus, Object, ObjectId, ObjectOut, ObjectReference, Owner, StructTag,
-    Transaction, TransactionEffects, TypeTag, UserSignature, Version,
+    Address, Digest, ExecutionStatus, Object, ObjectId, ObjectOut, ObjectReference, Owner,
+    StructTag, Transaction, TransactionEffects, TypeTag, UserSignature, Version,
 };
 
 // -----------------------------------------------------------------------------
@@ -211,6 +214,50 @@ impl<O: ObjectTypeFinder + ?Sized> ObjectTypeFinder for Box<O> {
 }
 
 // -----------------------------------------------------------------------------
+// EventReader
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, thiserror::Error)]
+pub enum EventReaderError {
+    #[error("event-reader backend: {0}")]
+    Backend(String),
+}
+
+pub type EventsByTxFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, EventReaderError>> + Send + 'a>>;
+
+/// Backend capability for reading events emitted by a specific transaction
+/// filtered by Move type. Returns the BCS payload of each matching event;
+/// callers BCS-decode into the typed Rust struct. Used by `EffectsExt` to
+/// surface typed events after a transaction.
+pub trait EventReader: Send + Sync {
+    fn events_by_tx<'a>(
+        &'a self,
+        digest: Digest,
+        type_tag: TypeTag,
+    ) -> EventsByTxFuture<'a>;
+}
+
+impl<R: EventReader + ?Sized> EventReader for std::sync::Arc<R> {
+    fn events_by_tx<'a>(
+        &'a self,
+        digest: Digest,
+        type_tag: TypeTag,
+    ) -> EventsByTxFuture<'a> {
+        R::events_by_tx(self, digest, type_tag)
+    }
+}
+impl<R: EventReader + ?Sized> EventReader for Box<R> {
+    fn events_by_tx<'a>(
+        &'a self,
+        digest: Digest,
+        type_tag: TypeTag,
+    ) -> EventsByTxFuture<'a> {
+        R::events_by_tx(self, digest, type_tag)
+    }
+}
+
+// -----------------------------------------------------------------------------
 // DryRunner — read-path execution backing `PtbBuilder::inspect()`
 // -----------------------------------------------------------------------------
 
@@ -350,6 +397,52 @@ impl ObjectTypeFinder for Client {
     }
 }
 
+impl EventReader for Client {
+    fn events_by_tx<'a>(
+        &'a self,
+        digest: Digest,
+        type_tag: TypeTag,
+    ) -> EventsByTxFuture<'a> {
+        Box::pin(async move {
+            let filter = EventFilter {
+                emitting_module: None,
+                event_type: Some(type_tag.to_string()),
+                sender: None,
+                transaction_digest: Some(digest.to_string()),
+            };
+            let mut bcs_payloads: Vec<Vec<u8>> = Vec::new();
+            let mut cursor: Option<String> = None;
+            loop {
+                let page = self
+                    .events(
+                        filter.clone(),
+                        PaginationFilter {
+                            cursor: cursor.clone(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| EventReaderError::Backend(e.to_string()))?;
+                for ev in &page.data {
+                    let bytes = base64ct_decode(&ev.bcs.0)
+                        .map_err(|e| EventReaderError::Backend(format!("base64: {e}")))?;
+                    bcs_payloads.push(bytes);
+                }
+                if !page.page_info.has_next_page {
+                    break;
+                }
+                cursor = page.page_info.end_cursor;
+            }
+            Ok(bcs_payloads)
+        })
+    }
+}
+
+fn base64ct_decode(s: &str) -> Result<Vec<u8>, base64ct::Error> {
+    use base64ct::Encoding;
+    base64ct::Base64::decode_vec(s)
+}
+
 impl GasOracle for Client {
     fn list_gas_coins<'a>(&'a self, owner: Address) -> ListGasCoinsFuture<'a> {
         Box::pin(async move {
@@ -465,6 +558,23 @@ pub trait ClientExt {
     where
         T: MoveType + serde::de::DeserializeOwned;
 
+    /// Batch variant of [`ClientExt::get_object`]. Walks every page returned
+    /// by the GraphQL backend, type-checks and decodes each object as `T`.
+    /// Returns the objects in the order the indexer chose, which is *not*
+    /// necessarily input order. Errors if any id is missing or has the wrong
+    /// type.
+    async fn get_objects<T>(&self, ids: &[ObjectId]) -> Result<Vec<T>, GetError>
+    where
+        T: MoveType + serde::de::DeserializeOwned;
+
+    /// Read the dynamic field at `(parent, key)` and decode its value as `V`.
+    /// `K::type_tag()` is sent as the field's name type; `V::type_tag()` is
+    /// checked against the indexer's reported value type before decoding.
+    async fn get_dynamic_field<K, V>(&self, parent: ObjectId, key: K) -> Result<V, GetError>
+    where
+        K: MoveType + serde::Serialize,
+        V: MoveType + serde::de::DeserializeOwned;
+
     /// Block until the indexer reflects every changed object in `effects`.
     ///
     /// `execute()` returns once the validators have processed the tx, but the
@@ -504,6 +614,78 @@ impl ClientExt for Client {
             .map_err(|e| GetError::Backend(e.to_string()))?
             .ok_or(GetError::NotFound(id))?;
         decode_object_as::<T>(id, &obj)
+    }
+
+    async fn get_objects<T>(&self, ids: &[ObjectId]) -> Result<Vec<T>, GetError>
+    where
+        T: MoveType + serde::de::DeserializeOwned,
+    {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let filter = ObjectFilter {
+            type_: None,
+            owner: None,
+            object_ids: Some(ids.to_vec()),
+        };
+        let mut objs: Vec<Object> = Vec::with_capacity(ids.len());
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = self
+                .objects(
+                    filter.clone(),
+                    PaginationFilter {
+                        cursor: cursor.clone(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| GetError::Backend(e.to_string()))?;
+            objs.extend(page.data);
+            if !page.page_info.has_next_page {
+                break;
+            }
+            cursor = page.page_info.end_cursor;
+        }
+
+        // Verify every requested id came back. The indexer silently drops ids
+        // it doesn't know — turn that into a typed error.
+        for id in ids {
+            if !objs.iter().any(|o| o.object_id() == *id) {
+                return Err(GetError::NotFound(*id));
+            }
+        }
+
+        objs.iter()
+            .map(|o| decode_object_as::<T>(o.object_id(), o))
+            .collect()
+    }
+
+    async fn get_dynamic_field<K, V>(&self, parent: ObjectId, key: K) -> Result<V, GetError>
+    where
+        K: MoveType + serde::Serialize,
+        V: MoveType + serde::de::DeserializeOwned,
+    {
+        let parent_addr: Address = *parent.as_address();
+        let output = self
+            .dynamic_field(parent_addr, K::type_tag(), key)
+            .await
+            .map_err(|e| GetError::Backend(e.to_string()))?
+            .ok_or(GetError::NotFound(parent))?;
+        let dfv = output
+            .value
+            .as_ref()
+            .ok_or(GetError::NotFound(parent))?;
+        let expected = V::type_tag();
+        if dfv.type_ != expected {
+            // We don't have a struct tag for the actual type unconditionally
+            // (it could be a primitive). Reuse `Backend` for the message.
+            return Err(GetError::Backend(format!(
+                "dynamic field on {parent}: expected value type {expected}, got {actual}",
+                actual = dfv.type_,
+            )));
+        }
+        bcs::from_bytes::<V>(&dfv.bcs).map_err(|source| GetError::Bcs { id: parent, source })
     }
 
     async fn wait_for_effects(
