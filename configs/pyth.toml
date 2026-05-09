@@ -1,0 +1,30 @@
+# Workspace bindings driven entirely by a single git source.
+#
+# Auto-discovery walks Pyth's [dependencies] and pulls in everything
+# transitively — Wormhole (vendored inside the Pyth checkout), Iota,
+# MoveStdlib. Output is a Cargo workspace at `configs/pyth-rs/` with one
+# crate per discovered package.
+#
+# Usage:
+#   cargo run -p move-bindgen-cli -- install  --config configs/pyth.toml
+#   cargo run -p move-bindgen-cli -- generate --config configs/pyth.toml
+#
+# Iota and MoveStdlib generate as peer crates (instead of routing into
+# the runtime), because Pyth's API references types like `iota::coin::Coin`
+# that aren't part of the runtime's basics. Codegen's well-known mappings
+# still route the basics (UID, ID, Option, String) through the runtime —
+# see crates/move-bindgen/src/codegen for the skip list.
+
+# Override the default ["Iota", "MoveStdlib"] — see header comment.
+framework_packages = []
+
+[output]
+format  = "workspace"
+name    = "pyth-rs"
+runtime = { path = "../crates/move-bindgen-runtime" }
+
+[packages.pyth]
+git        = "https://github.com/pyth-network/pyth-crosschain.git"
+rev        = "iota-contract-testnet"
+subdir     = "target_chains/sui/contracts"
+crate_name = "pyth-rs"

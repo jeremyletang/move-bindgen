@@ -35,22 +35,18 @@ enum Cmd {
     ///   1. Zero-config: pass a positional `<package>` path — generates
     ///      one crate at `<package>-rs` (or `--out`). Uses
     ///      `--runtime-path` for the runtime dep in `Cargo.toml`.
-    ///   2. Config-driven: pass `--config <toml>`. Reads
-    ///      `move-bindgen.toml`; output goes alongside the config (or to
-    ///      `--out`); runtime dep comes from the config.
+    ///   2. Config-driven: pass `--config <toml>`. Reads the staging dir
+    ///      written by `move-bindgen install` and emits Rust against it.
+    ///      Errors clearly if `install` hasn't run yet.
     Generate {
         /// Zero-config: path to a Move package (directory with `Move.toml`).
         #[arg(conflicts_with = "config")]
         package: Option<PathBuf>,
         /// Config-driven: path to a `move-bindgen.toml`. Mutually
-        /// exclusive with the positional `<package>`.
+        /// exclusive with the positional `<package>`. Reads staging
+        /// from `<config-dir>/.move-bindgen-<config-stem>/`.
         #[arg(long, conflicts_with = "package")]
         config: Option<PathBuf>,
-        /// Where to look for the Move packages referenced by
-        /// `[packages.*].path` in the config. Repeatable; first match
-        /// wins. Defaults to the config file's directory.
-        #[arg(long = "input-folder", requires = "config")]
-        input_folders: Vec<PathBuf>,
         /// Output directory. Defaults to `<package>-rs` sibling to
         /// `package` (zero-config mode) or `<config-dir>/<output.name>`
         /// (config mode).
@@ -78,6 +74,20 @@ enum Cmd {
         #[arg(long = "input-folder")]
         input_folders: Vec<PathBuf>,
     },
+    /// Resolve every `[packages.*]` entry, copy/clone its source into a
+    /// staging directory next to the config, rewrite Move.toml address
+    /// placeholders, and write a `packages.json` manifest. `move-bindgen
+    /// generate` reads that manifest — install is the only step that
+    /// may hit the network.
+    Install {
+        /// Path to the config file. Defaults to `./move-bindgen.toml`.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Bases against which `[packages.*].path` entries resolve.
+        /// Repeatable; first hit wins. Defaults to the config dir.
+        #[arg(long = "input-folder")]
+        input_folders: Vec<PathBuf>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -90,12 +100,11 @@ fn main() -> anyhow::Result<()> {
         Cmd::Generate {
             package,
             config,
-            input_folders,
             out,
             runtime_path,
         } => match (package, config) {
             (Some(pkg), None) => generate_zero_config(&pkg, out.as_deref(), &runtime_path)?,
-            (None, Some(cfg)) => generate_with_config(&cfg, &input_folders, out.as_deref())?,
+            (None, Some(cfg)) => generate_with_config(&cfg, out.as_deref())?,
             _ => anyhow::bail!(
                 "pass either a positional <package> path or --config <toml>, but not both"
             ),
@@ -107,6 +116,13 @@ fn main() -> anyhow::Result<()> {
             let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
             let cfg = Config::load(&config_path)?;
             check_config(&cfg, &input_folders)?;
+        }
+        Cmd::Install {
+            config,
+            input_folders,
+        } => {
+            let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
+            move_bindgen::install(&config_path, &input_folders)?;
         }
     }
     Ok(())
@@ -131,50 +147,78 @@ fn generate_zero_config(
     Ok(())
 }
 
-fn generate_with_config(
-    config_path: &Path,
-    input_folders: &[PathBuf],
-    out: Option<&Path>,
-) -> anyhow::Result<()> {
+fn generate_with_config(config_path: &Path, out: Option<&Path>) -> anyhow::Result<()> {
     let cfg = Config::load(config_path)?;
+    let staging_root = move_bindgen::staging_dir_for(config_path);
+    let manifest = move_bindgen::InstallManifest::load(&staging_root)?;
+    let overrides = parse_overrides(&manifest.address_overrides)?;
     match cfg.format {
         OutputFormat::SingleCrate => {
-            let entry = cfg
-                .packages
-                .first()
-                .expect("validator guarantees one entry in single-crate mode");
-            let pkg_path = cfg.resolve_package_path(entry, input_folders)?;
-            let bindings = move_bindgen::load_package(&pkg_path)?;
-            // Default name = `<entry crate name>` (e.g. `counter-rs`).
-            let out_name = cfg
-                .output_name
-                .clone()
-                .unwrap_or_else(|| entry.crate_name());
-            let out_dir = out
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| cfg.config_dir.join(&out_name));
-            let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &out_dir);
-            let opts = move_bindgen::GenerateOptions {
-                runtime,
-                ..Default::default()
-            };
-            let crate_ = move_bindgen::generate(&bindings, &opts)?;
-            write_crate(&out_dir, &crate_)?;
-            eprintln!("wrote crate to {}", out_dir.display());
+            generate_single_from_staging(&cfg, &staging_root, &manifest, &overrides, out)
         }
         OutputFormat::Workspace => {
-            generate_workspace(&cfg, input_folders, out)?;
+            generate_workspace_from_staging(&cfg, &staging_root, &manifest, &overrides, out)
         }
     }
+}
+
+fn parse_overrides(
+    map: &BTreeMap<String, String>,
+) -> anyhow::Result<BTreeMap<String, AccountAddress>> {
+    map.iter()
+        .map(|(name, hex)| {
+            let addr = AccountAddress::from_hex_literal(hex)
+                .with_context(|| format!("parsing override for {name}: {hex}"))?;
+            Ok((name.clone(), addr))
+        })
+        .collect()
+}
+
+fn generate_single_from_staging(
+    cfg: &Config,
+    staging_root: &Path,
+    manifest: &move_bindgen::InstallManifest,
+    overrides: &BTreeMap<String, AccountAddress>,
+    out: Option<&Path>,
+) -> anyhow::Result<()> {
+    let pkg = manifest
+        .packages
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("staging manifest has no packages"))?;
+    let pkg_path = staging_root.join(&pkg.staged_path);
+    let bindings = move_bindgen::load_package_with_options(
+        &pkg_path,
+        &BuildOptions {
+            additional_named_addresses: overrides.clone(),
+            ..Default::default()
+        },
+    )?;
+    let out_name = cfg
+        .output_name
+        .clone()
+        .unwrap_or_else(|| pkg.crate_name.clone());
+    let out_dir = out
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| cfg.config_dir.join(&out_name));
+    let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &out_dir);
+    let opts = move_bindgen::GenerateOptions {
+        runtime,
+        crate_name_override: Some(pkg.crate_name.clone()),
+        ..Default::default()
+    };
+    let crate_ = move_bindgen::generate(&bindings, &opts)?;
+    write_crate(&out_dir, &crate_)?;
+    eprintln!("wrote crate to {}", out_dir.display());
     Ok(())
 }
 
-fn generate_workspace(
+fn generate_workspace_from_staging(
     cfg: &Config,
-    input_folders: &[PathBuf],
+    staging_root: &Path,
+    manifest: &move_bindgen::InstallManifest,
+    overrides: &BTreeMap<String, AccountAddress>,
     out: Option<&Path>,
 ) -> anyhow::Result<()> {
-    // Workspace name is required by config validation, so it's always Some.
     let workspace_name = cfg
         .output_name
         .clone()
@@ -183,86 +227,34 @@ fn generate_workspace(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| cfg.config_dir.join(&workspace_name));
 
-    // Phase 0 — stage every input folder into a writeable mirror, then
-    // rewrite each listed package's Move.toml in the mirror to convert
-    // literal `"0x0"` placeholders to `"_"` so our address overrides can
-    // bind them to unique synthetic values. Original sources untouched.
-    let staging_root = workspace_dir.join(".staging");
-    if staging_root.exists() {
-        std::fs::remove_dir_all(&staging_root)?;
-    }
-    std::fs::create_dir_all(&staging_root)?;
-    let staged_inputs_owned: Vec<PathBuf> = {
-        let mut out: Vec<PathBuf> = Vec::with_capacity(input_folders.len().max(1));
-        if input_folders.is_empty() {
-            let dest = staging_root.join("0");
-            copy_dir_recursive(&cfg.config_dir, &dest)
-                .with_context(|| format!("copying {} to staging", cfg.config_dir.display()))?;
-            out.push(dest);
-        } else {
-            for (i, src) in input_folders.iter().enumerate() {
-                let dest = staging_root.join(i.to_string());
-                copy_dir_recursive(src, &dest)
-                    .with_context(|| format!("copying {} to staging", src.display()))?;
-                out.push(dest);
-            }
-        }
-        out
-    };
-
-    // Phase 1a — resolve each [packages.*].path against staging (not the
-    // original input folders), and rewrite its Move.toml to convert
-    // literal `"0x0"` to `"_"`. Then pre-scan each rewritten Move.toml's
-    // `[addresses]` block and assign a unique synthetic address to every
-    // named address that's now `"_"`. The combined override map is fed
-    // to every package's build so the IR sees consistent distinct
-    // addresses across the workspace.
-    let mut overrides: BTreeMap<String, AccountAddress> = BTreeMap::new();
-    let mut next_synth: u128 = 0xff00_0000_0000_0001;
-    let mut resolved_paths: Vec<std::path::PathBuf> = Vec::with_capacity(cfg.packages.len());
-    for entry in &cfg.packages {
-        let pkg_path = cfg.resolve_package_path(entry, &staged_inputs_owned)?;
-        let move_toml = pkg_path.join("Move.toml");
-        rewrite_addresses_to_underscore(&move_toml)?;
-        let names = read_addresses_block(&move_toml)?;
-        for (name, val) in names {
-            if val != "_" {
-                continue;
-            }
-            if overrides.contains_key(&name) {
-                continue;
-            }
-            let addr = synthetic_address(next_synth);
-            next_synth += 1;
-            overrides.insert(name, addr);
-        }
-        resolved_paths.push(pkg_path);
-    }
-
-    // Phase 1b — load every package with the override map applied,
-    // build the peer map keyed by address.
-    let mut loaded: Vec<(move_bindgen::PackageEntry, Bindings)> =
-        Vec::with_capacity(cfg.packages.len());
+    // Phase 1 — load every staged package, build the peer map keyed by
+    // address. Framework-marked entries are skipped: the runtime owns
+    // their types and ty.rs's well-known mappings handle the routing.
+    let mut loaded = Vec::with_capacity(manifest.packages.len());
     let mut peers = PeerMap::new();
-    for (entry, pkg_path) in cfg.packages.iter().zip(resolved_paths.iter()) {
-        let opts = BuildOptions {
-            additional_named_addresses: overrides.clone(),
-            ..Default::default()
-        };
-        let bindings = move_bindgen::load_package_with_options(pkg_path, &opts)?;
+    for pkg in &manifest.packages {
+        if pkg.framework {
+            continue;
+        }
+        let pkg_path = staging_root.join(&pkg.staged_path);
+        let bindings = move_bindgen::load_package_with_options(
+            &pkg_path,
+            &BuildOptions {
+                additional_named_addresses: overrides.clone(),
+                ..Default::default()
+            },
+        )?;
         let addr = bindings_address(&bindings);
-        peers.insert(addr, entry.crate_name())?;
-        loaded.push((entry.clone(), bindings));
+        peers.insert(addr, pkg.crate_name.clone())?;
+        loaded.push((pkg.clone(), bindings));
     }
 
-    // Phase 2 — codegen each member crate, computing per-crate peer deps
-    // by walking type references in its IR.
+    // Phase 2 — codegen each member crate, computing per-crate peer
+    // deps by walking type references in its IR.
     std::fs::create_dir_all(&workspace_dir)?;
     let mut member_dirs = Vec::with_capacity(loaded.len());
-    for (entry, bindings) in &loaded {
-        let crate_name = entry.crate_name();
-        let crate_dir = workspace_dir.join(&crate_name);
-
+    for (pkg, bindings) in &loaded {
+        let crate_dir = workspace_dir.join(&pkg.crate_name);
         let foreign = foreign_addresses_used(bindings);
         let own_addr = bindings_address(bindings);
         let peer_deps = foreign
@@ -279,24 +271,22 @@ fn generate_workspace(
             })
             .collect::<Vec<_>>();
 
-        // Each member's runtime path is relative to the member's own
-        // `Cargo.toml` (one level deeper than the workspace root).
         let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &crate_dir);
-        let skip_modules = framework_skip_modules(&bindings.package_name);
+        let skip_modules = framework_skip_modules(&pkg.move_name);
         let opts = move_bindgen::GenerateOptions {
             runtime,
             peers: peers.clone(),
             as_workspace_member: true,
             peer_deps,
             skip_modules,
-            crate_name_override: Some(crate_name.clone()),
+            crate_name_override: Some(pkg.crate_name.clone()),
         };
         let crate_ = move_bindgen::generate(bindings, &opts)?;
         write_crate(&crate_dir, &crate_)?;
-        member_dirs.push(crate_name);
+        member_dirs.push(pkg.crate_name.clone());
     }
 
-    // Phase 3 — workspace-level Cargo.toml.
+    // Phase 3 — workspace-level Cargo.toml + .gitignore.
     let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &workspace_dir);
     let workspace_cargo = render_workspace_cargo_toml(&member_dirs, &runtime);
     std::fs::write(workspace_dir.join("Cargo.toml"), workspace_cargo)?;
@@ -308,86 +298,6 @@ fn generate_workspace(
         member_dirs.len()
     );
     Ok(())
-}
-
-/// Recursively copy `src` to `dest`. Skips entries the build doesn't
-/// need to see — `build/`, `target/`, `Move.lock` — to keep staging fast
-/// and reproducible.
-fn copy_dir_recursive(src: &Path, dest: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dest)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str == "build"
-            || name_str == "target"
-            || name_str == ".git"
-            || name_str == "Move.lock"
-        {
-            continue;
-        }
-        let src_path = entry.path();
-        let dest_path = dest.join(&name);
-        let ft = entry.file_type()?;
-        if ft.is_dir() {
-            copy_dir_recursive(&src_path, &dest_path)?;
-        } else if ft.is_file() {
-            std::fs::copy(&src_path, &dest_path)?;
-        } else if ft.is_symlink() {
-            let target = std::fs::read_link(&src_path)?;
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&target, &dest_path)?;
-            #[cfg(not(unix))]
-            anyhow::bail!("symlink in input not supported on this platform");
-        }
-    }
-    Ok(())
-}
-
-/// Rewrite a Move.toml's `[addresses]` block in place, converting any
-/// `"0x0"` literal value to `"_"`. Other entries (real addresses, already
-/// `_`, etc.) are left alone. Used in the staging copy only — the user's
-/// originals are never touched.
-fn rewrite_addresses_to_underscore(move_toml: &Path) -> anyhow::Result<()> {
-    let text = std::fs::read_to_string(move_toml)
-        .with_context(|| format!("reading {}", move_toml.display()))?;
-    let mut out = String::with_capacity(text.len());
-    let mut current_section: Option<String> = None;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix('[') {
-            if let Some(name) = rest.strip_suffix(']') {
-                current_section = Some(name.to_string());
-            }
-        }
-        if current_section.as_deref() == Some("addresses") {
-            if let Some(rewritten) = rewrite_zero_address_line(line) {
-                out.push_str(&rewritten);
-                out.push('\n');
-                continue;
-            }
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    std::fs::write(move_toml, out).with_context(|| format!("writing {}", move_toml.display()))?;
-    Ok(())
-}
-
-fn rewrite_zero_address_line(line: &str) -> Option<String> {
-    let leading_ws_end = line.find(|c: char| !c.is_whitespace())?;
-    let (leading_ws, rest) = line.split_at(leading_ws_end);
-    let (key, after_eq) = rest.split_once('=')?;
-    let after = after_eq.trim();
-    // Strip a possible trailing comment.
-    let value_part = after
-        .split_once('#')
-        .map(|(v, _)| v.trim())
-        .unwrap_or(after);
-    if value_part != "\"0x0\"" {
-        return None;
-    }
-    Some(format!("{leading_ws}{}= \"_\"", key.trim_end()))
 }
 
 /// Modules whose types are owned by `move-bindgen-runtime` and so should
@@ -417,29 +327,6 @@ fn framework_skip_modules(package_name: &str) -> std::collections::BTreeSet<Stri
         _ => {}
     }
     out
-}
-
-fn read_addresses_block(move_toml: &Path) -> anyhow::Result<BTreeMap<String, String>> {
-    let text = std::fs::read_to_string(move_toml)
-        .with_context(|| format!("reading {}", move_toml.display()))?;
-    let v: toml::Value =
-        toml::from_str(&text).with_context(|| format!("parsing {}", move_toml.display()))?;
-    let mut out = BTreeMap::new();
-    if let Some(t) = v.get("addresses").and_then(toml::Value::as_table) {
-        for (k, val) in t {
-            if let Some(s) = val.as_str() {
-                out.insert(k.clone(), s.to_string());
-            }
-        }
-    }
-    Ok(out)
-}
-
-fn synthetic_address(n: u128) -> AccountAddress {
-    let mut bytes = [0u8; 32];
-    let n_bytes = n.to_be_bytes();
-    bytes[16..32].copy_from_slice(&n_bytes);
-    AccountAddress::new(bytes)
 }
 
 fn bindings_address(b: &Bindings) -> AccountAddress {
@@ -571,12 +458,20 @@ fn check_config(cfg: &Config, input_folders: &[PathBuf]) -> anyhow::Result<()> {
     );
     println!("  packages ({}):", cfg.packages.len());
     for p in &cfg.packages {
-        let resolved = cfg.resolve_package_path(p, input_folders)?;
+        let summary: String = match &p.source {
+            move_bindgen::PackageSource::Path(_) => cfg
+                .resolve_path_source(p, input_folders)?
+                .display()
+                .to_string(),
+            move_bindgen::PackageSource::Git { url, rev, .. } => {
+                format!("git:{url} (rev {})", rev.as_deref().unwrap_or("<default>"))
+            }
+        };
         println!(
-            "    [{:>20}]  crate={:<28} path={}",
+            "    [{:>20}]  crate={:<28} {}",
             p.id,
             p.crate_name(),
-            resolved.display()
+            summary
         );
     }
     Ok(())

@@ -12,6 +12,10 @@ Move.lock
 # Generated bindings — produced by `move-bindgen generate` against configs/.
 /generated
 
+# Staging directories — produced by `move-bindgen fetch` next to each
+# config (`<config-dir>/.move-bindgen-<config-stem>/`).
+.move-bindgen-*/
+
 # Editors / OS
 .DS_Store
 .idea/
