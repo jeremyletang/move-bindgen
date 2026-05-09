@@ -34,10 +34,11 @@ pub use iota_sdk_types::{
     Transaction, TransactionEffects, TypeTag, UserSignature, Version,
 };
 pub use move_bindgen_ext::{
-    ClientExt, DecodeError, DryRunError, DryRunEstimateFuture, DryRunFuture, DryRunner, FetchError,
-    FetchFuture, FetchedObject, Fetcher, FindByTypeFuture, FindError, GasOracle, GetError,
-    InspectResult, ListGasCoinsFuture, ObjectTypeFinder, OracleError, RefGasPriceFuture,
-    SubmitError, SubmitFuture, Submitter, SuggestBudgetFuture,
+    ClientExt, DecodeError, DryRunError, DryRunEstimateFuture, DryRunFuture, DryRunner,
+    EventReader, EventReaderError, EventsByTxFuture, FetchError, FetchFuture, FetchedObject,
+    Fetcher, FindByTypeFuture, FindError, GasOracle, GetError, InspectResult, ListGasCoinsFuture,
+    ObjectTypeFinder, OracleError, RefGasPriceFuture, SubmitError, SubmitFuture, Submitter,
+    SuggestBudgetFuture, WaitError, WaitOptions,
 };
 pub use primitive_types::U256;
 
@@ -162,6 +163,39 @@ pub trait EffectsExt {
         &self,
         finder: &(impl ObjectTypeFinder + ?Sized),
     ) -> Result<Vec<ObjectReference>, FindError>;
+
+    /// `created_in` followed by a typed batch fetch — returns fully decoded
+    /// `T`s for every object of type `T` newly created in this tx.
+    async fn created_decoded<T>(
+        &self,
+        client: &(impl ObjectTypeFinder + ClientExt),
+    ) -> Result<Vec<T>, EffectsDecodeError>
+    where
+        T: MoveType + serde::de::DeserializeOwned;
+
+    /// `mutated_in` followed by a typed batch fetch.
+    async fn mutated_decoded<T>(
+        &self,
+        client: &(impl ObjectTypeFinder + ClientExt),
+    ) -> Result<Vec<T>, EffectsDecodeError>
+    where
+        T: MoveType + serde::de::DeserializeOwned;
+
+    /// `changed_in` followed by a typed batch fetch.
+    async fn changed_decoded<T>(
+        &self,
+        client: &(impl ObjectTypeFinder + ClientExt),
+    ) -> Result<Vec<T>, EffectsDecodeError>
+    where
+        T: MoveType + serde::de::DeserializeOwned;
+
+    /// BCS-decode every event of type `E` emitted by this tx.
+    async fn events_of_type<E>(
+        &self,
+        reader: &(impl EventReader + ?Sized),
+    ) -> Result<Vec<E>, EventsError>
+    where
+        E: MoveType + serde::de::DeserializeOwned;
 }
 
 impl EffectsExt for TransactionEffects {
@@ -191,6 +225,90 @@ impl EffectsExt for TransactionEffects {
             .find_by_type(T::type_tag(), changed_ids(self, ChangeKind::Any))
             .await
     }
+
+    async fn created_decoded<T>(
+        &self,
+        client: &(impl ObjectTypeFinder + ClientExt),
+    ) -> Result<Vec<T>, EffectsDecodeError>
+    where
+        T: MoveType + serde::de::DeserializeOwned,
+    {
+        decoded_for(self, client, ChangeKind::Created).await
+    }
+
+    async fn mutated_decoded<T>(
+        &self,
+        client: &(impl ObjectTypeFinder + ClientExt),
+    ) -> Result<Vec<T>, EffectsDecodeError>
+    where
+        T: MoveType + serde::de::DeserializeOwned,
+    {
+        decoded_for(self, client, ChangeKind::Mutated).await
+    }
+
+    async fn changed_decoded<T>(
+        &self,
+        client: &(impl ObjectTypeFinder + ClientExt),
+    ) -> Result<Vec<T>, EffectsDecodeError>
+    where
+        T: MoveType + serde::de::DeserializeOwned,
+    {
+        decoded_for(self, client, ChangeKind::Any).await
+    }
+
+    async fn events_of_type<E>(
+        &self,
+        reader: &(impl EventReader + ?Sized),
+    ) -> Result<Vec<E>, EventsError>
+    where
+        E: MoveType + serde::de::DeserializeOwned,
+    {
+        let digest = self.as_v1().transaction_digest;
+        let payloads = reader
+            .events_by_tx(digest, E::type_tag())
+            .await
+            .map_err(EventsError::Reader)?;
+        payloads
+            .iter()
+            .map(|b| bcs::from_bytes::<E>(b).map_err(EventsError::Bcs))
+            .collect()
+    }
+}
+
+/// Errors from the `*_decoded` family on [`EffectsExt`].
+#[derive(Debug, thiserror::Error)]
+pub enum EffectsDecodeError {
+    #[error(transparent)]
+    Find(#[from] FindError),
+    #[error(transparent)]
+    Get(#[from] GetError),
+}
+
+/// Errors from [`EffectsExt::events_of_type`].
+#[derive(Debug, thiserror::Error)]
+pub enum EventsError {
+    #[error(transparent)]
+    Reader(#[from] EventReaderError),
+    #[error("bcs decode of event payload: {0}")]
+    Bcs(bcs::Error),
+}
+
+async fn decoded_for<T>(
+    effects: &TransactionEffects,
+    client: &(impl ObjectTypeFinder + ClientExt),
+    kind: ChangeKind,
+) -> Result<Vec<T>, EffectsDecodeError>
+where
+    T: MoveType + serde::de::DeserializeOwned,
+{
+    let refs = client
+        .find_by_type(T::type_tag(), changed_ids(effects, kind))
+        .await?;
+    if refs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<ObjectId> = refs.iter().map(|r| r.object_id).collect();
+    Ok(client.get_objects::<T>(&ids).await?)
 }
 
 #[derive(Copy, Clone)]
