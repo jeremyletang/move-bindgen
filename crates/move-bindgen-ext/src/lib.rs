@@ -231,28 +231,16 @@ pub type EventsByTxFuture<'a> =
 /// callers BCS-decode into the typed Rust struct. Used by `EffectsExt` to
 /// surface typed events after a transaction.
 pub trait EventReader: Send + Sync {
-    fn events_by_tx<'a>(
-        &'a self,
-        digest: Digest,
-        type_tag: TypeTag,
-    ) -> EventsByTxFuture<'a>;
+    fn events_by_tx<'a>(&'a self, digest: Digest, type_tag: TypeTag) -> EventsByTxFuture<'a>;
 }
 
 impl<R: EventReader + ?Sized> EventReader for std::sync::Arc<R> {
-    fn events_by_tx<'a>(
-        &'a self,
-        digest: Digest,
-        type_tag: TypeTag,
-    ) -> EventsByTxFuture<'a> {
+    fn events_by_tx<'a>(&'a self, digest: Digest, type_tag: TypeTag) -> EventsByTxFuture<'a> {
         R::events_by_tx(self, digest, type_tag)
     }
 }
 impl<R: EventReader + ?Sized> EventReader for Box<R> {
-    fn events_by_tx<'a>(
-        &'a self,
-        digest: Digest,
-        type_tag: TypeTag,
-    ) -> EventsByTxFuture<'a> {
+    fn events_by_tx<'a>(&'a self, digest: Digest, type_tag: TypeTag) -> EventsByTxFuture<'a> {
         R::events_by_tx(self, digest, type_tag)
     }
 }
@@ -398,11 +386,7 @@ impl ObjectTypeFinder for Client {
 }
 
 impl EventReader for Client {
-    fn events_by_tx<'a>(
-        &'a self,
-        digest: Digest,
-        type_tag: TypeTag,
-    ) -> EventsByTxFuture<'a> {
+    fn events_by_tx<'a>(&'a self, digest: Digest, type_tag: TypeTag) -> EventsByTxFuture<'a> {
         Box::pin(async move {
             let filter = EventFilter {
                 emitting_module: None,
@@ -672,10 +656,7 @@ impl ClientExt for Client {
             .await
             .map_err(|e| GetError::Backend(e.to_string()))?
             .ok_or(GetError::NotFound(parent))?;
-        let dfv = output
-            .value
-            .as_ref()
-            .ok_or(GetError::NotFound(parent))?;
+        let dfv = output.value.as_ref().ok_or(GetError::NotFound(parent))?;
         let expected = V::type_tag();
         if dfv.type_ != expected {
             // We don't have a struct tag for the actual type unconditionally
@@ -759,6 +740,7 @@ pub enum WaitError {
     Decode(#[from] GetError),
 }
 
+#[allow(clippy::result_large_err)]
 fn require_success(effects: &TransactionEffects) -> Result<(), WaitError> {
     match effects.status() {
         ExecutionStatus::Success => Ok(()),
