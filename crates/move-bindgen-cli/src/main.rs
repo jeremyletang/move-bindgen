@@ -31,6 +31,11 @@ fn get_version() -> &'static str {
     about = "Generate Rust bindings from a Move package"
 )]
 #[command(version = get_version())]
+// Clamp `--help` line width on wide terminals to match cargo's 79.
+// Without this, clap uses the full terminal width and long-form
+// descriptions sprawl across the screen. The actual width is min of
+// this and the live terminal, so narrow terminals still wrap tight.
+#[command(max_term_width = 79)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -38,108 +43,137 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Build the package and print a summary of its IR. No code is written.
+    /// Print a Move package's IR summary.
+    ///
+    /// Builds the package and prints modules, structs, enums,
+    /// constants, and functions to stdout. No files are written.
+    /// Useful for debugging codegen.
     Dump {
-        /// Path to the Move package (directory containing `Move.toml`).
+        /// Move package directory (containing `Move.toml`).
         package: PathBuf,
     },
-    /// Build the package and write a complete Rust bindings crate.
+    /// Write Rust bindings for a Move package or config.
     ///
     /// Two modes:
-    ///   1. Zero-config: pass a positional `<package>` path — generates
-    ///      one crate at `<package>-rs` (or `--out`). Uses
-    ///      `--runtime-path` for the runtime dep in `Cargo.toml`.
-    ///   2. Config-driven: pass `--config <toml>`. Reads the staging dir
-    ///      written by `move-bindgen install` and emits Rust against it.
-    ///      Errors clearly if `install` hasn't run yet.
+    ///   1. Zero-config — pass a positional `<package>` path. Emits
+    ///      one crate at `<package>-rs` (or `-o <dir>`). The runtime
+    ///      dep defaults to a git dep on the public move-bindgen
+    ///      repo; override with `--runtime-path` for in-tree work.
+    ///   2. Config-driven — pass `--config <toml>` (or rely on the
+    ///      default `./move-bindgen.toml`). Reads the staging dir
+    ///      written by `install` and emits Rust against it. Errors
+    ///      clearly if `install` hasn't run or sources have drifted.
     Generate {
-        /// Zero-config: path to a Move package (directory with `Move.toml`).
+        /// Zero-config Move package path.
+        ///
+        /// Mutually exclusive with `--config`. Emits a single crate
+        /// rather than a workspace.
         #[arg(conflicts_with = "config")]
         package: Option<PathBuf>,
-        /// Config-driven: path to a `move-bindgen.toml`. Mutually
-        /// exclusive with the positional `<package>`. Reads staging
-        /// from `<config-dir>/.move-bindgen-<config-stem>/`.
+        /// Config file [default: ./move-bindgen.toml].
+        ///
+        /// Reads staging from `<config-dir>/.move-bindgen-<stem>/`.
         #[arg(long, conflicts_with = "package")]
         config: Option<PathBuf>,
-        /// Output directory. Defaults to `<package>-rs` sibling to
-        /// `package` (zero-config mode) or `<config-dir>/<output.name>`
-        /// (config mode).
+        /// Output directory.
+        ///
+        /// Defaults to `<package>-rs` sibling (zero-config) or
+        /// `<config-dir>/<output.name>` (config-driven).
         #[arg(long, short = 'o')]
         out: Option<PathBuf>,
-        /// Override `move-bindgen-runtime` with a local path. Useful
-        /// when developing the runtime alongside generated code. When
-        /// unset, the generated `Cargo.toml` depends on the public git
-        /// repo (master). Ignored when `--config` is set — the config's
-        /// runtime takes precedence.
+        /// Local path for `move-bindgen-runtime` (zero-config only).
+        ///
+        /// Useful when developing the runtime alongside generated
+        /// code. When unset, the generated `Cargo.toml` depends on
+        /// the public git repo (master). Ignored when `--config` is
+        /// set — the config's runtime takes precedence.
         #[arg(long)]
         runtime_path: Option<String>,
-        /// Suppress progress output. Errors still report to stderr.
+        /// Suppress progress output.
         #[arg(long, short = 'q', conflicts_with = "verbose")]
         quiet: bool,
-        /// Forward upstream Move toolchain output (linter notes, build
-        /// chatter, compiler warnings) to stderr. Useful when debugging
-        /// install/generate failures.
+        /// Forward upstream Move toolchain output to stderr.
+        ///
+        /// Surfaces linter notes, build chatter, and compiler
+        /// warnings that are otherwise captured for clean output.
+        /// Useful when debugging install/generate failures.
         #[arg(long, short = 'v', conflicts_with = "quiet")]
         verbose: bool,
     },
-    /// Load and validate a `move-bindgen.toml`. No code is written; this
-    /// surfaces parse / shape / uniqueness errors and prints a summary of
-    /// the resolved config.
+    /// Validate a move-bindgen.toml without writing anything.
     ///
-    /// `--input-dir` is repeatable. Each `[packages.*].path` is
-    /// resolved against each input dir in order; first hit wins.
-    /// Defaults to the config file's directory if no input dirs are
-    /// passed.
+    /// Surfaces parse / shape / uniqueness errors, resolves each
+    /// `[packages.*].path` against the input dirs, and prints a
+    /// summary. Cheap pre-flight before `install`.
     Check {
-        /// Path to the config file. Defaults to `./move-bindgen.toml`.
+        /// Config file [default: ./move-bindgen.toml].
         #[arg(long)]
         config: Option<PathBuf>,
-        /// Where to look for the Move packages referenced by `[packages.*].path`.
-        /// Repeatable; first hit wins. Defaults to the config file's dir.
+        /// Search base for `[packages.*].path` (repeatable).
+        ///
+        /// First hit wins. Defaults to the config file's directory
+        /// when no `--input-dir` is given.
         #[arg(long = "input-dir", short = 'i')]
         input_dirs: Vec<PathBuf>,
     },
-    /// Scaffold a starter `move-bindgen.toml` in `<dir>` (default `.`).
-    /// Generates a workspace-mode template with the public git runtime
-    /// preset; you fill in `[packages.*]` entries. Errors if a config
-    /// already exists at the target path.
+    /// Create a starter move-bindgen.toml.
+    ///
+    /// Workspace-mode template, public git runtime, `framework_packages
+    /// = []` so Iota types beyond the runtime's well-known set work
+    /// out of the box. Refuses to overwrite without `--force`.
     Init {
-        /// Directory in which to create `move-bindgen.toml`. Defaults
-        /// to the current working directory.
+        /// Target directory.
         #[arg(default_value = ".")]
         dir: PathBuf,
+        /// Workspace name [default: <dir basename>-rs].
+        ///
+        /// Skips the `-rs` suffix when the basename already ends
+        /// in `-rs` (so `exchange-rs` doesn't become `exchange-rs-rs`).
+        #[arg(long)]
+        name: Option<String>,
+        /// Overwrite an existing config.
+        #[arg(long, short = 'f')]
+        force: bool,
     },
-    /// Resolve every `[packages.*]` entry, copy/clone its source into a
-    /// staging directory next to the config, rewrite Move.toml address
-    /// placeholders, and write a `packages.json` manifest. `move-bindgen
-    /// generate` reads that manifest — install is the only step that
-    /// may hit the network.
+    /// Stage all configured packages.
+    ///
+    /// Resolves every `[packages.*]` entry, copies/clones its source
+    /// into `<config-dir>/.move-bindgen-<stem>/`, rewrites Move.toml
+    /// address placeholders, and writes a `packages.json` manifest.
+    /// The only step that may hit the network.
     Install {
-        /// Path to the config file. Defaults to `./move-bindgen.toml`.
+        /// Config file [default: ./move-bindgen.toml].
         #[arg(long)]
         config: Option<PathBuf>,
-        /// Bases against which `[packages.*].path` entries resolve.
-        /// Repeatable; first hit wins. Defaults to the config dir.
+        /// Search base for `[packages.*].path` (repeatable).
+        ///
+        /// First hit wins. Defaults to the config dir.
         #[arg(long = "input-dir", short = 'i')]
         input_dirs: Vec<PathBuf>,
-        /// Suppress progress output. Errors still report to stderr.
+        /// Suppress progress output.
         #[arg(long, short = 'q', conflicts_with = "verbose")]
         quiet: bool,
         /// Forward upstream Move toolchain output to stderr.
         #[arg(long, short = 'v', conflicts_with = "quiet")]
         verbose: bool,
     },
-    /// Run `install` followed by `generate` in one step. Same flags
-    /// as `install` plus `-o/--out`. The typical day-to-day workflow.
+    /// Run install + generate.
+    ///
+    /// Same flags as `install` plus `-o/--out`. The day-to-day verb.
+    /// Use `install` and `generate` separately when you want explicit
+    /// control over the network step.
     Build {
-        /// Path to the config file. Defaults to `./move-bindgen.toml`.
+        /// Config file [default: ./move-bindgen.toml].
         #[arg(long)]
         config: Option<PathBuf>,
-        /// Bases against which `[packages.*].path` entries resolve.
-        /// Repeatable; first hit wins. Defaults to the config dir.
+        /// Search base for `[packages.*].path` (repeatable).
+        ///
+        /// First hit wins. Defaults to the config dir.
         #[arg(long = "input-dir", short = 'i')]
         input_dirs: Vec<PathBuf>,
-        /// Output directory override. Defaults to `<config-dir>/<output.name>`.
+        /// Output directory.
+        ///
+        /// Defaults to `<config-dir>/<output.name>`.
         #[arg(long, short = 'o')]
         out: Option<PathBuf>,
         /// Suppress progress output.
@@ -148,6 +182,15 @@ enum Cmd {
         /// Forward upstream Move toolchain output to stderr.
         #[arg(long, short = 'v', conflicts_with = "quiet")]
         verbose: bool,
+    },
+    /// Remove the staging dir.
+    ///
+    /// Idempotent: succeeds silently when nothing is staged. Useful
+    /// to force a fresh install or reclaim disk.
+    Clean {
+        /// Config file [default: ./move-bindgen.toml].
+        #[arg(long)]
+        config: Option<PathBuf>,
     },
 }
 
@@ -220,12 +263,15 @@ fn main() -> anyhow::Result<()> {
             let cfg = Config::load(&config_path)?;
             check_config(&cfg, &input_dirs)?;
         }
-        Cmd::Init { dir } => {
-            let written = move_bindgen::init(&dir)?;
+        Cmd::Init { dir, name, force } => {
+            let pre_existed = config_path_in(&dir).is_file();
+            let opts = move_bindgen::InitOptions { name, force };
+            let written = move_bindgen::init(&dir, &opts)?;
             // `init` always emits — quiet would defeat the only feedback.
             // Keep the message style consistent with the reporter.
             let reporter = Reporter::new();
-            reporter.stage("Created", written.display().to_string());
+            let verb = if pre_existed { "Rewrote" } else { "Created" };
+            reporter.stage(verb, written.display().to_string());
         }
         Cmd::Install {
             config,
@@ -248,6 +294,21 @@ fn main() -> anyhow::Result<()> {
             let reporter = make_reporter(quiet, verbose);
             move_bindgen::install(&config_path, &input_dirs, &reporter)?;
             generate_with_config(&config_path, out.as_deref(), &reporter)?;
+        }
+        Cmd::Clean { config } => {
+            let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
+            let reporter = Reporter::new();
+            match move_bindgen::clean(&config_path)? {
+                move_bindgen::CleanOutcome::Removed(path) => {
+                    reporter.stage("Removed", path.display().to_string());
+                }
+                move_bindgen::CleanOutcome::NotFound(path) => {
+                    reporter.stage(
+                        "Skipped",
+                        format!("{} (nothing to clean)", path.display()),
+                    );
+                }
+            }
         }
     }
     Ok(())

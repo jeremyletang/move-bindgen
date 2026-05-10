@@ -6,6 +6,7 @@
 //! ```
 
 mod build;
+mod clean;
 mod codegen;
 mod config;
 mod digest;
@@ -27,7 +28,8 @@ pub use config::{
 pub use digest::{file_digest, source_dir_digest};
 pub use docs::DocMap;
 pub use git_resolver::resolve_git_source;
-pub use init::run as init;
+pub use clean::{run as clean, CleanOutcome};
+pub use init::{run as init, InitOptions};
 pub use install::{run as install, verify_freshness};
 pub use install_manifest::{
     InstallManifest, SerializableSource, StagedPackage, MANIFEST_FILENAME, MANIFEST_VERSION,

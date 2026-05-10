@@ -82,15 +82,31 @@ runtime = {{ git = "{git_url}" }}
     )
 }
 
+/// Options for [`run`]. All knobs the CLI exposes.
+#[derive(Debug, Clone, Default)]
+pub struct InitOptions {
+    /// Override the auto-derived crate name (default: kebab-cased
+    /// directory basename + `-rs`).
+    pub name: Option<String>,
+    /// Overwrite an existing `move-bindgen.toml`. Off by default to
+    /// keep `init` a non-destructive verb; the CLI exposes `--force`.
+    pub force: bool,
+}
+
 /// Write a starter `move-bindgen.toml` into `dir`. Errors if a config
-/// already exists there — overwriting with no warning would be too
-/// destructive for an "init" verb.
-pub fn run(dir: &Path) -> Result<PathBuf> {
+/// already exists there unless `opts.force` is set.
+pub fn run(dir: &Path, opts: &InitOptions) -> Result<PathBuf> {
     let path = config_path_in(dir);
-    if path.exists() {
-        bail!("{} already exists — refusing to overwrite", path.display());
+    if path.exists() && !opts.force {
+        bail!(
+            "{} already exists — pass --force to overwrite",
+            path.display()
+        );
     }
-    let output_name = default_output_name_from_dir(dir);
+    let output_name = opts
+        .name
+        .clone()
+        .unwrap_or_else(|| default_output_name_from_dir(dir));
     let body = render_starter(&output_name);
     std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
@@ -177,20 +193,70 @@ mod tests {
     }
 
     #[test]
-    fn run_refuses_to_overwrite() {
+    fn run_refuses_to_overwrite_without_force() {
         let dir = std::env::temp_dir().join(format!("move-bindgen-init-{}", std::process::id()));
         if dir.exists() {
             std::fs::remove_dir_all(&dir).unwrap();
         }
         std::fs::create_dir_all(&dir).unwrap();
 
-        let written = run(&dir).unwrap();
+        let written = run(&dir, &InitOptions::default()).unwrap();
         assert!(written.is_file(), "first run wrote the file");
 
-        let err = run(&dir).unwrap_err();
+        let err = run(&dir, &InitOptions::default()).unwrap_err();
         assert!(
-            format!("{err}").contains("already exists"),
-            "second run errors instead of clobbering: {err}",
+            format!("{err}").contains("--force"),
+            "second run errors with the --force hint: {err}",
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn run_overwrites_with_force() {
+        let dir =
+            std::env::temp_dir().join(format!("move-bindgen-init-force-{}", std::process::id()));
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("move-bindgen.toml"), "stale = true\n").unwrap();
+
+        let written = run(
+            &dir,
+            &InitOptions {
+                force: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let body = std::fs::read_to_string(&written).unwrap();
+        assert!(
+            body.contains("[output]"),
+            "force overwrote with the starter template",
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn run_honors_name_override() {
+        let dir =
+            std::env::temp_dir().join(format!("move-bindgen-init-name-{}", std::process::id()));
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        let written = run(
+            &dir,
+            &InitOptions {
+                name: Some("my-bindings".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let body = std::fs::read_to_string(&written).unwrap();
+        assert!(
+            body.contains("name    = \"my-bindings\""),
+            "explicit --name wins over the dir-basename default",
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
