@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use anyhow::Context;
 use move_bindgen::{
-    config_path_in, foreign_addresses_used, Bindings, BuildOptions, Config, OutputFormat, PeerDep,
-    PeerMap, Reporter, RuntimeSpec,
+    config_path_in, foreign_addresses_used, Bindings, BuildOptions, Config, InsertOutcome,
+    OutputFormat, PeerDep, PeerMap, Reporter, RuntimeSpec,
 };
 use move_core_types::account_address::AccountAddress;
 
@@ -74,8 +74,13 @@ enum Cmd {
         #[arg(long)]
         runtime_path: Option<String>,
         /// Suppress progress output. Errors still report to stderr.
-        #[arg(long, short = 'q')]
+        #[arg(long, short = 'q', conflicts_with = "verbose")]
         quiet: bool,
+        /// Forward upstream Move toolchain output (linter notes, build
+        /// chatter, compiler warnings) to stderr. Useful when debugging
+        /// install/generate failures.
+        #[arg(long, short = 'v', conflicts_with = "quiet")]
+        verbose: bool,
     },
     /// Load and validate a `move-bindgen.toml`. No code is written; this
     /// surfaces parse / shape / uniqueness errors and prints a summary of
@@ -118,9 +123,61 @@ enum Cmd {
         #[arg(long = "input-dir", short = 'i')]
         input_dirs: Vec<PathBuf>,
         /// Suppress progress output. Errors still report to stderr.
-        #[arg(long, short = 'q')]
+        #[arg(long, short = 'q', conflicts_with = "verbose")]
         quiet: bool,
+        /// Forward upstream Move toolchain output to stderr.
+        #[arg(long, short = 'v', conflicts_with = "quiet")]
+        verbose: bool,
     },
+    /// Run `install` followed by `generate` in one step. Same flags
+    /// as `install` plus `-o/--out`. The typical day-to-day workflow.
+    Build {
+        /// Path to the config file. Defaults to `./move-bindgen.toml`.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Bases against which `[packages.*].path` entries resolve.
+        /// Repeatable; first hit wins. Defaults to the config dir.
+        #[arg(long = "input-dir", short = 'i')]
+        input_dirs: Vec<PathBuf>,
+        /// Output directory override. Defaults to `<config-dir>/<output.name>`.
+        #[arg(long, short = 'o')]
+        out: Option<PathBuf>,
+        /// Suppress progress output.
+        #[arg(long, short = 'q', conflicts_with = "verbose")]
+        quiet: bool,
+        /// Forward upstream Move toolchain output to stderr.
+        #[arg(long, short = 'v', conflicts_with = "quiet")]
+        verbose: bool,
+    },
+}
+
+/// Build a `Reporter` from the CLI's `(quiet, verbose)` flag pair.
+/// `clap`'s `conflicts_with` already rules out both being true.
+fn make_reporter(quiet: bool, verbose: bool) -> Reporter {
+    if quiet {
+        Reporter::quiet()
+    } else if verbose {
+        Reporter::verbose()
+    } else {
+        Reporter::new()
+    }
+}
+
+/// Build the `BuildOptions` struct passed into `move-bindgen` for
+/// codegen. When the reporter is verbose, upstream Move-toolchain
+/// chatter is forwarded to stderr (skipping the `gag` capture wrapper)
+/// and the compiler's warning channel is unsuppressed.
+fn make_build_opts(
+    overrides: &BTreeMap<String, AccountAddress>,
+    reporter: &Reporter,
+) -> BuildOptions {
+    let verbose = reporter.is_verbose();
+    BuildOptions {
+        additional_named_addresses: overrides.clone(),
+        print_diags_to_stderr: verbose,
+        silence_warnings: !verbose,
+        ..Default::default()
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -136,12 +193,9 @@ fn main() -> anyhow::Result<()> {
             out,
             runtime_path,
             quiet,
+            verbose,
         } => {
-            let reporter = if quiet {
-                Reporter::quiet()
-            } else {
-                Reporter::new()
-            };
+            let reporter = make_reporter(quiet, verbose);
             match (package, config) {
                 // Both — clap should already reject this via `conflicts_with`,
                 // but guard explicitly so a future schema change doesn't
@@ -177,14 +231,23 @@ fn main() -> anyhow::Result<()> {
             config,
             input_dirs,
             quiet,
+            verbose,
         } => {
             let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
-            let reporter = if quiet {
-                Reporter::quiet()
-            } else {
-                Reporter::new()
-            };
+            let reporter = make_reporter(quiet, verbose);
             move_bindgen::install(&config_path, &input_dirs, &reporter)?;
+        }
+        Cmd::Build {
+            config,
+            input_dirs,
+            out,
+            quiet,
+            verbose,
+        } => {
+            let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
+            let reporter = make_reporter(quiet, verbose);
+            move_bindgen::install(&config_path, &input_dirs, &reporter)?;
+            generate_with_config(&config_path, out.as_deref(), &reporter)?;
         }
     }
     Ok(())
@@ -198,7 +261,10 @@ fn generate_zero_config(
 ) -> anyhow::Result<()> {
     let started = std::time::Instant::now();
     reporter.stage("Compiling", package.display().to_string());
-    let bindings = move_bindgen::load_package(package)?;
+    let bindings = move_bindgen::load_package_with_options(
+        package,
+        &make_build_opts(&BTreeMap::new(), reporter),
+    )?;
     let runtime = match runtime_path {
         Some(p) => RuntimeSpec::Path(PathBuf::from(p)),
         None => RuntimeSpec::default_git(),
@@ -277,13 +343,8 @@ fn generate_single_from_staging(
         .ok_or_else(|| anyhow::anyhow!("staging manifest has no packages"))?;
     let pkg_path = staging_root.join(&pkg.staged_path);
     reporter.stage("Compiling", &pkg.move_name);
-    let bindings = move_bindgen::load_package_with_options(
-        &pkg_path,
-        &BuildOptions {
-            additional_named_addresses: overrides.clone(),
-            ..Default::default()
-        },
-    )?;
+    let bindings =
+        move_bindgen::load_package_with_options(&pkg_path, &make_build_opts(overrides, reporter))?;
     let out_name = cfg
         .output_name
         .clone()
@@ -341,14 +402,30 @@ fn generate_workspace_from_staging(
         reporter.stage("Compiling", &pkg.move_name);
         let bindings = move_bindgen::load_package_with_options(
             &pkg_path,
-            &BuildOptions {
-                additional_named_addresses: overrides.clone(),
-                ..Default::default()
-            },
+            &make_build_opts(overrides, reporter),
         )?;
         let addr = bindings_address(&bindings);
-        peers.insert(addr, pkg.crate_name.clone())?;
-        loaded.push((pkg.clone(), bindings));
+        match peers.insert(addr, pkg.crate_name.clone()) {
+            InsertOutcome::Inserted => {
+                loaded.push((pkg.clone(), bindings));
+            }
+            InsertOutcome::Aliased { canonical } => {
+                // Address already mapped to an earlier-staged peer.
+                // Skip generating a redundant crate; references at
+                // this address from the rest of the workspace route
+                // through `canonical` instead. See `PeerMap::insert`
+                // for the rationale.
+                reporter.stage(
+                    "Aliasing",
+                    format!(
+                        "{} → {} (address 0x{} already covered)",
+                        pkg.crate_name,
+                        canonical,
+                        addr.short_str_lossless()
+                    ),
+                );
+            }
+        }
     }
 
     // Phase 2 — codegen each member crate, computing per-crate peer

@@ -29,6 +29,11 @@ const RESET: &str = "\x1b[0m";
 pub enum ReporterMode {
     Normal,
     Quiet,
+    /// Like `Normal`, but additionally tells callers to forward
+    /// upstream Move toolchain output (linter notes, build chatter,
+    /// git-fetch logs) to stderr instead of capturing it. Useful for
+    /// debugging install/generate failures.
+    Verbose,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +57,25 @@ impl Reporter {
             mode: ReporterMode::Quiet,
             color: false,
         }
+    }
+
+    /// Like `new`, but signals that upstream toolchain output should
+    /// be forwarded rather than captured. Callers consult
+    /// [`Reporter::is_verbose`] to decide whether to gag stderr,
+    /// silence Move-compiler warnings, etc.
+    pub fn verbose() -> Self {
+        Self {
+            mode: ReporterMode::Verbose,
+            color: io::stderr().is_terminal(),
+        }
+    }
+
+    /// Whether callers should forward upstream toolchain output instead
+    /// of capturing it. The reporter itself never reads this; it's a
+    /// shared flag carried alongside the status-printing knob so the
+    /// CLI doesn't have to thread two parameters.
+    pub fn is_verbose(&self) -> bool {
+        matches!(self.mode, ReporterMode::Verbose)
     }
 
     /// Print a `<verb> <subject>` status line.
@@ -91,6 +115,13 @@ mod tests {
         // process stderr and we don't capture it. The branch matters
         // for coverage of the early-return path.
         r.stage("Verb", "subject");
+    }
+
+    #[test]
+    fn verbose_flag_round_trips() {
+        assert!(!Reporter::new().is_verbose());
+        assert!(!Reporter::quiet().is_verbose());
+        assert!(Reporter::verbose().is_verbose());
     }
 
     #[test]

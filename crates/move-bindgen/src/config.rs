@@ -134,25 +134,6 @@ impl Config {
         Self::from_raw(raw, config_dir)
     }
 
-    /// Resolve any `[packages.*]` entry's source to a local on-disk
-    /// directory containing `Move.toml`. Dispatches to the path
-    /// resolver (input-folder lookup) or the git resolver (drives
-    /// `move-package`'s fetcher) depending on the source variant.
-    pub fn resolve_source(
-        &self,
-        entry: &PackageEntry,
-        input_folders: &[PathBuf],
-        scratch_root: &Path,
-    ) -> Result<PathBuf> {
-        match &entry.source {
-            PackageSource::Path(_) => self.resolve_path_source(entry, input_folders),
-            PackageSource::Git { .. } => crate::git_resolver::resolve_git_source(
-                &entry.source,
-                &scratch_root.join(&entry.id),
-            ),
-        }
-    }
-
     /// Path-only variant. Errors if the entry is git-sourced.
     pub fn resolve_path_source(
         &self,

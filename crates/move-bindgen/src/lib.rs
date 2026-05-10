@@ -33,5 +33,5 @@ pub use install_manifest::{
     InstallManifest, SerializableSource, StagedPackage, MANIFEST_FILENAME, MANIFEST_VERSION,
 };
 pub use ir::{load_package, load_package_with_options, Bindings};
-pub use peer::{foreign_addresses_used, PeerEntry, PeerMap};
+pub use peer::{foreign_addresses_used, InsertOutcome, PeerEntry, PeerMap};
 pub use reporter::{Reporter, ReporterMode};

@@ -88,7 +88,11 @@ pub fn run(
 
     let mut records: Vec<StagedRecord> = Vec::new();
     let mut staged_keys: BTreeSet<String> = BTreeSet::new();
-    let mut used_basenames: BTreeMap<String, String> = BTreeMap::new();
+    // Tracks staging basenames already in use. Distinct sources that
+    // resolve to the same basename (e.g. a vendored `iota-framework`
+    // alongside Pyth's git `iota-framework`) get an auto-numeric suffix
+    // — basenames are internal, users don't refer to them.
+    let mut used_basenames: BTreeSet<String> = BTreeSet::new();
     let mut used_ids: BTreeSet<String> = BTreeSet::new();
     let mut used_crate_names: BTreeMap<String, String> = BTreeMap::new();
     // source_key → staging basename. Phase 2 uses this to rewrite each
@@ -111,15 +115,14 @@ pub fn run(
 
         let source_root = resolve_item_source(&item, &staging_root, reporter)?;
         let entry_label = item.label();
-        let basename = source_basename(&source_root, &entry_label);
-        if let Some(prev) = used_basenames.insert(basename.clone(), entry_label.clone()) {
-            bail!(
-                "packages '{}' and '{}' share staging basename '{}' — give one of them a distinct directory",
-                prev,
-                entry_label,
-                basename,
-            );
-        }
+        // Auto-disambiguate the staging basename. Two distinct sources
+        // can naturally share a basename (e.g. a local `iota-framework`
+        // alongside a git-pinned one); a numeric suffix (-2, -3, …)
+        // keeps them in separate dirs without forcing the user to name
+        // them manually.
+        let raw_basename = source_basename(&source_root, &entry_label);
+        let basename = unique_basename(&raw_basename, &used_basenames);
+        used_basenames.insert(basename.clone());
 
         let entry_id = item.id.clone().unwrap_or_else(|| basename.clone());
         if !used_ids.insert(entry_id.clone()) {
@@ -137,10 +140,18 @@ pub fn run(
         let framework = cfg.framework_packages.contains(&move_name);
         reporter.stage("Staging", &move_name);
 
-        let crate_name = item
-            .crate_name_override
-            .clone()
-            .unwrap_or_else(|| default_crate_name(&item.source));
+        // Crate name resolution:
+        //   - Explicit override → use it.
+        //   - Listed entry without override → derive from source spec
+        //     (existing behaviour). Conflicts → bail with guidance.
+        //   - Auto-discovered entry → derive from the (possibly
+        //     disambiguated) staging basename so it tracks the
+        //     auto-suffix and never clashes silently.
+        let crate_name = match (&item.crate_name_override, item.id.is_some()) {
+            (Some(name), _) => name.clone(),
+            (None, true) => default_crate_name(&item.source),
+            (None, false) => format!("{basename}-rs"),
+        };
         if let Some(prev) = used_crate_names.insert(crate_name.clone(), entry_id.clone()) {
             bail!(
                 "packages '{}' and '{}' both produce crate '{}' — set `crate_name` on one to disambiguate",
@@ -398,6 +409,7 @@ fn resolve_item_source(
             crate::git_resolver::resolve_git_source(
                 &item.source,
                 &staging_root.join(".git-probes").join(scratch_id(item)),
+                reporter.is_verbose(),
             )
         }
     }
@@ -427,6 +439,23 @@ fn source_basename(source_root: &Path, fallback: &str) -> String {
         .and_then(|s| s.to_str())
         .map(str::to_string)
         .unwrap_or_else(|| fallback.to_string())
+}
+
+/// Pick a basename not already in `used`. If `raw` is free, use it
+/// verbatim; otherwise append `-2`, `-3`, … until a free slot is
+/// found. The counter is open-ended so this never fails.
+fn unique_basename(raw: &str, used: &BTreeSet<String>) -> String {
+    if !used.contains(raw) {
+        return raw.to_string();
+    }
+    let mut suffix: u32 = 2;
+    loop {
+        let candidate = format!("{raw}-{suffix}");
+        if !used.contains(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
 }
 
 /// Walk every staged package's `[addresses]` block, find names whose
@@ -566,11 +595,25 @@ fn rewrite_staged_manifest(
                     key,
                 )
             })?;
+            // Preserve `override = true` when the original dep had it.
+            // Move-package uses this flag at the *root* of a build to
+            // force a single version of an otherwise-conflicting
+            // package (e.g. dex's `oracle-pyth-source` overrides
+            // Pyth's git-pinned Iota with a vendored copy). Dropping
+            // it would re-surface the resolver conflict our staging
+            // disambiguation just made possible.
+            let preserve_override = dep_table
+                .get("override")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(false);
             let mut replacement = toml::value::Table::new();
             replacement.insert(
                 "local".into(),
                 toml::Value::String(format!("../{basename}")),
             );
+            if preserve_override {
+                replacement.insert("override".into(), toml::Value::Boolean(true));
+            }
             *val = toml::Value::Table(replacement);
         }
     }
@@ -709,6 +752,18 @@ fn parse_move_deps(text: &str) -> Result<Vec<MoveDep>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unique_basename_disambiguates() {
+        let mut used: BTreeSet<String> = BTreeSet::new();
+        assert_eq!(unique_basename("iota-framework", &used), "iota-framework");
+        used.insert("iota-framework".into());
+        assert_eq!(unique_basename("iota-framework", &used), "iota-framework-2");
+        used.insert("iota-framework-2".into());
+        assert_eq!(unique_basename("iota-framework", &used), "iota-framework-3");
+        // Distinct base unaffected by collisions on a sibling.
+        assert_eq!(unique_basename("move-stdlib", &used), "move-stdlib");
+    }
 
     #[test]
     fn synthetic_addresses_are_distinct() {
