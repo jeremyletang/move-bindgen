@@ -151,6 +151,7 @@ fn generate_with_config(config_path: &Path, out: Option<&Path>) -> anyhow::Resul
     let cfg = Config::load(config_path)?;
     let staging_root = move_bindgen::staging_dir_for(config_path);
     let manifest = move_bindgen::InstallManifest::load(&staging_root)?;
+    move_bindgen::verify_freshness(config_path, &manifest)?;
     let overrides = parse_overrides(&manifest.address_overrides)?;
     match cfg.format {
         OutputFormat::SingleCrate => {

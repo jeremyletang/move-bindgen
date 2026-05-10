@@ -22,19 +22,23 @@ pub const MANIFEST_FILENAME: &str = "packages.json";
 
 /// Bumped when the on-disk schema changes incompatibly. `generate`
 /// errors clearly if it sees a mismatched version (so users learn to
-/// re-run `fetch`).
-pub const MANIFEST_VERSION: u32 = 1;
+/// re-run `install`).
+pub const MANIFEST_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallManifest {
     pub version: u32,
+    /// Hash of `move-bindgen.toml` contents at install time. `generate`
+    /// re-hashes the live config and compares; any drift triggers a
+    /// "re-run install" error. Format: `"sha256:<hex>"`.
+    pub config_digest: String,
     /// Packages in stable id order. Each entry carries enough state for
     /// codegen to walk it without consulting the original config or
     /// `move-package`.
     pub packages: Vec<StagedPackage>,
     /// Named-address overrides applied to every Move build at generate
     /// time. Built from `_` placeholders in any staged Move.toml's
-    /// `[addresses]`. Synthetic addresses are baked here so fetch +
+    /// `[addresses]`. Synthetic addresses are baked here so install +
     /// generate agree across runs.
     #[serde(default)]
     pub address_overrides: BTreeMap<String, String>,
@@ -56,8 +60,19 @@ pub struct StagedPackage {
     /// run against this path.
     pub staged_path: PathBuf,
     /// Original source spec — kept for diagnostics + future drift
-    /// detection between fetch and generate.
+    /// detection between install and generate.
     pub source: SerializableSource,
+    /// Canonical absolute path install copied this package's source
+    /// from. For local entries that's the resolved `path = …`; for
+    /// git entries it's the `~/.move/<sanitized>/<subdir>/` location
+    /// move-package's fetcher gave us. `generate` re-hashes this
+    /// directory (best-effort — silently skips if the path is gone) to
+    /// detect "user edited a Move source after running install".
+    pub source_abs_path: PathBuf,
+    /// SHA-256 over the relevant contents of `source_abs_path` at
+    /// install time. Format: `"sha256:<hex>"`. Recomputed by `generate`
+    /// — drift triggers a "re-run install" error.
+    pub source_digest: String,
     /// True if this entry's modules are owned by `move-bindgen-runtime`
     /// (Iota framework + Move stdlib). No codegen runs for it; refs to
     /// its types route into the runtime via the well-known mapping.
@@ -162,6 +177,7 @@ mod tests {
         overrides.insert("fixed18".into(), "0xff00000000000004".into());
         let m = InstallManifest {
             version: MANIFEST_VERSION,
+            config_digest: "sha256:0000".into(),
             packages: vec![StagedPackage {
                 id: "exchange".into(),
                 move_name: "real_markets".into(),
@@ -170,6 +186,8 @@ mod tests {
                 source: SerializableSource::Path {
                     path: PathBuf::from("packages/exchange"),
                 },
+                source_abs_path: PathBuf::from("/abs/exchange"),
+                source_digest: "sha256:dead".into(),
                 framework: false,
             }],
             address_overrides: overrides,
@@ -179,12 +197,15 @@ mod tests {
         assert_eq!(back.packages.len(), 1);
         assert_eq!(back.packages[0].id, "exchange");
         assert_eq!(back.address_overrides.len(), 2);
+        assert_eq!(back.config_digest, "sha256:0000");
+        assert_eq!(back.packages[0].source_digest, "sha256:dead");
     }
 
     #[test]
     fn round_trip_git_entry() {
         let m = InstallManifest {
             version: MANIFEST_VERSION,
+            config_digest: "sha256:beef".into(),
             packages: vec![StagedPackage {
                 id: "pyth".into(),
                 move_name: "Pyth".into(),
@@ -197,6 +218,8 @@ mod tests {
                     tag: None,
                     subdir: Some("target_chains/sui/contracts".into()),
                 },
+                source_abs_path: PathBuf::from("/home/u/.move/foo/contracts"),
+                source_digest: "sha256:cafe".into(),
                 framework: false,
             }],
             address_overrides: BTreeMap::new(),
@@ -221,6 +244,7 @@ mod tests {
         // version check on `load` without touching the filesystem.
         let bad = serde_json::json!({
             "version": 99,
+            "config_digest": "sha256:0000",
             "packages": []
         });
         let parsed: InstallManifest = serde_json::from_value(bad).unwrap();

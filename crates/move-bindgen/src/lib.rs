@@ -8,6 +8,7 @@
 mod build;
 mod codegen;
 mod config;
+mod digest;
 mod docs;
 mod git_resolver;
 mod install;
@@ -20,9 +21,10 @@ pub use codegen::{generate, GenerateOptions, GeneratedCrate, PeerDep};
 pub use config::{
     config_path_in, staging_dir_for, Config, OutputFormat, PackageEntry, PackageSource, RuntimeSpec,
 };
+pub use digest::{file_digest, source_dir_digest};
 pub use docs::DocMap;
 pub use git_resolver::resolve_git_source;
-pub use install::run as install;
+pub use install::{run as install, verify_freshness};
 pub use install_manifest::{
     InstallManifest, SerializableSource, StagedPackage, MANIFEST_FILENAME, MANIFEST_VERSION,
 };
