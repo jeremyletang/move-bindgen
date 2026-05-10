@@ -11,12 +11,26 @@ use move_bindgen::{
 };
 use move_core_types::account_address::AccountAddress;
 
+fn get_version() -> &'static str {
+    Box::leak(
+        format!(
+            "{} ({}) {} {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("GIT_HASH"),
+            env!("RUSTC_VERSION"),
+            std::env::consts::ARCH,
+        )
+        .into_boxed_str(),
+    )
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "move-bindgen",
     version,
     about = "Generate Rust bindings from a Move package"
 )]
+#[command(version = get_version())]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
