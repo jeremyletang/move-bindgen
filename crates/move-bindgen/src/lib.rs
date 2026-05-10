@@ -15,6 +15,7 @@ mod install;
 mod install_manifest;
 mod ir;
 mod peer;
+mod reporter;
 
 pub use build::BuildOptions;
 pub use codegen::{generate, GenerateOptions, GeneratedCrate, PeerDep};
@@ -30,3 +31,4 @@ pub use install_manifest::{
 };
 pub use ir::{load_package, load_package_with_options, Bindings};
 pub use peer::{foreign_addresses_used, PeerEntry, PeerMap};
+pub use reporter::{Reporter, ReporterMode};

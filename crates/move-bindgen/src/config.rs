@@ -148,7 +148,8 @@ impl Config {
                 );
             }
         };
-        let candidates: Vec<PathBuf> = if input_folders.is_empty() {
+        let no_input_dir = input_folders.is_empty();
+        let candidates: Vec<PathBuf> = if no_input_dir {
             vec![self.config_dir.clone()]
         } else {
             input_folders.to_vec()
@@ -166,11 +167,19 @@ impl Config {
             .map(|p| format!("  - {}", p.display()))
             .collect::<Vec<_>>()
             .join("\n");
-        Err(anyhow!(
+        let mut msg = format!(
             "package '{}' not found — looked for Move.toml at:\n{}",
-            entry.id,
-            attempts
-        ))
+            entry.id, attempts
+        );
+        if no_input_dir {
+            msg.push_str(
+                "\n\nhint: no --input-dir was provided; the path was resolved against the\n\
+                 config's directory. If your [packages.*].path entries are relative to a\n\
+                 different base (e.g. an external Move repo checkout), pass\n\
+                 --input-dir <path> pointing to that base.",
+            );
+        }
+        Err(anyhow!(msg))
     }
 
     fn from_raw(raw: RawConfig, config_dir: PathBuf) -> Result<Self> {

@@ -70,6 +70,7 @@ clap      = { version = "4", features = ["derive"] }
 toml      = "0.8"
 sha2      = "0.10"
 hex       = "0.4"
+gag       = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

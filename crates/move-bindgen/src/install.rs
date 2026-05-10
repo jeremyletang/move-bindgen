@@ -44,8 +44,17 @@ use crate::install_manifest::{
 
 /// Drive an install. `config_path` points at the user's `move-bindgen.toml`;
 /// `input_folders` are the bases against which `PackageSource::Path`
-/// entries are resolved. Returns the staging root that was populated.
-pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
+/// entries are resolved. `reporter` receives cargo-style status lines
+/// (use `Reporter::quiet()` to suppress). Returns the staging root that
+/// was populated.
+pub fn run(
+    config_path: &Path,
+    input_folders: &[PathBuf],
+    reporter: &crate::reporter::Reporter,
+) -> Result<PathBuf> {
+    let started = std::time::Instant::now();
+    reporter.stage("Resolving", config_path.display().to_string());
+
     let cfg = Config::load(config_path)?;
     let staging_root = crate::config::staging_dir_for(config_path);
 
@@ -100,7 +109,7 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
             continue;
         }
 
-        let source_root = resolve_item_source(&item, &staging_root)?;
+        let source_root = resolve_item_source(&item, &staging_root, reporter)?;
         let entry_label = item.label();
         let basename = source_basename(&source_root, &entry_label);
         if let Some(prev) = used_basenames.insert(basename.clone(), entry_label.clone()) {
@@ -126,6 +135,7 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
             .with_context(|| format!("copying {} to staging", source_root.display()))?;
         let move_name = read_move_package_name(&source_root.join("Move.toml"))?;
         let framework = cfg.framework_packages.contains(&move_name);
+        reporter.stage("Staging", &move_name);
 
         let crate_name = item
             .crate_name_override
@@ -219,10 +229,13 @@ pub fn run(config_path: &Path, input_folders: &[PathBuf]) -> Result<PathBuf> {
     };
     manifest.save(&staging_root)?;
 
-    eprintln!(
-        "staged {} package(s) to {}",
-        manifest.packages.len(),
-        staging_root.display()
+    reporter.stage(
+        "Finished",
+        format!(
+            "installing {} package(s) in {:.2}s",
+            manifest.packages.len(),
+            started.elapsed().as_secs_f64()
+        ),
     );
     Ok(staging_root)
 }
@@ -353,7 +366,11 @@ fn source_key(s: &PackageSource) -> String {
     }
 }
 
-fn resolve_item_source(item: &WorkItem, staging_root: &Path) -> Result<PathBuf> {
+fn resolve_item_source(
+    item: &WorkItem,
+    staging_root: &Path,
+    reporter: &crate::reporter::Reporter,
+) -> Result<PathBuf> {
     match &item.source {
         PackageSource::Path(p) => {
             // Listed entries were resolved against input folders before
@@ -365,10 +382,24 @@ fn resolve_item_source(item: &WorkItem, staging_root: &Path) -> Result<PathBuf> 
             }
             Ok(p.clone())
         }
-        PackageSource::Git { .. } => crate::git_resolver::resolve_git_source(
-            &item.source,
-            &staging_root.join(".git-probes").join(scratch_id(item)),
-        ),
+        PackageSource::Git {
+            url,
+            rev,
+            branch,
+            tag,
+            ..
+        } => {
+            let label = rev
+                .as_deref()
+                .or(branch.as_deref())
+                .or(tag.as_deref())
+                .unwrap_or("?");
+            reporter.stage("Fetching", format!("{url} @ {label}"));
+            crate::git_resolver::resolve_git_source(
+                &item.source,
+                &staging_root.join(".git-probes").join(scratch_id(item)),
+            )
+        }
     }
 }
 
