@@ -72,7 +72,7 @@ enum Cmd {
         package: Option<PathBuf>,
         /// Config file [default: ./move-bindgen.toml].
         ///
-        /// Reads staging from `<config-dir>/.move-bindgen-<stem>/`.
+        /// Reads staging from `<config-dir>/.move-bindgen/<stem>/`.
         #[arg(long, conflicts_with = "package")]
         config: Option<PathBuf>,
         /// Output directory.
@@ -138,7 +138,7 @@ enum Cmd {
     /// Stage all configured packages.
     ///
     /// Resolves every `[packages.*]` entry, copies/clones its source
-    /// into `<config-dir>/.move-bindgen-<stem>/`, rewrites Move.toml
+    /// into `<config-dir>/.move-bindgen/<stem>/`, rewrites Move.toml
     /// address placeholders, and writes a `packages.json` manifest.
     /// The only step that may hit the network.
     Install {
