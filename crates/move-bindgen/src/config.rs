@@ -49,8 +49,19 @@ pub enum OutputFormat {
 /// Flavour is per-project. Two flavours don't mix in one workspace
 /// (different SDK type identities). Default is `Iota`; the Sui path
 /// is being introduced (see `PLAN_SUI_COMPAT.md`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    clap::ValueEnum,
+)]
 #[serde(rename_all = "lowercase")]
+#[clap(rename_all = "lowercase")]
 pub enum Flavour {
     #[default]
     Iota,

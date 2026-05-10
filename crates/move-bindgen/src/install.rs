@@ -113,7 +113,7 @@ pub fn run(
             continue;
         }
 
-        let source_root = resolve_item_source(&item, &staging_root, reporter)?;
+        let source_root = resolve_item_source(&item, &staging_root, reporter, cfg.flavour)?;
         let entry_label = item.label();
         // Auto-disambiguate the staging basename. Two distinct sources
         // can naturally share a basename (e.g. a local `iota-framework`
@@ -382,6 +382,7 @@ fn resolve_item_source(
     item: &WorkItem,
     staging_root: &Path,
     reporter: &crate::reporter::Reporter,
+    flavour: crate::config::Flavour,
 ) -> Result<PathBuf> {
     match &item.source {
         PackageSource::Path(p) => {
@@ -411,6 +412,7 @@ fn resolve_item_source(
                 &item.source,
                 &staging_root.join(".git-probes").join(scratch_id(item)),
                 reporter.is_verbose(),
+                flavour,
             )
         }
     }

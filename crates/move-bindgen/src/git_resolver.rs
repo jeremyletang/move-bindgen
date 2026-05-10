@@ -33,12 +33,30 @@ use move_package::BuildConfig as MoveBuildConfig;
 use crate::config::PackageSource;
 
 /// Resolve a `PackageSource::Git` to a local directory containing
-/// `Move.toml`. `scratch_root` is a writeable dir where the synthetic
-/// probe manifest lives (used to drive the fetcher). Pass any
-/// disposable directory. When `verbose`, move-package's progress
-/// output (clone/fetch lines) is forwarded to stderr; otherwise it's
-/// piped to `io::sink()`.
+/// `Move.toml`. Dispatches on `flavour`: the Iota path uses
+/// `iota_move_build`'s implicit-deps + IOTA's `move-package` fork; the
+/// Sui path bails until Phase 2c lands the corresponding adapter.
+///
+/// `scratch_root` is a writeable dir where the synthetic probe
+/// manifest lives (used to drive the fetcher). When `verbose`,
+/// move-package's progress output is forwarded to stderr; otherwise
+/// it's piped to `io::sink()`.
 pub fn resolve_git_source(
+    source: &PackageSource,
+    scratch_root: &Path,
+    verbose: bool,
+    flavour: crate::config::Flavour,
+) -> Result<PathBuf> {
+    match flavour {
+        crate::config::Flavour::Iota => resolve_git_source_iota(source, scratch_root, verbose),
+        crate::config::Flavour::Sui => bail!(
+            "Sui flavour is not yet implemented — git resolution for Sui packages \
+             lands in Phase 2c. See PLAN_SUI_COMPAT.md for status."
+        ),
+    }
+}
+
+fn resolve_git_source_iota(
     source: &PackageSource,
     scratch_root: &Path,
     verbose: bool,
@@ -186,6 +204,28 @@ mod tests {
         assert_eq!(
             last,
             "https___github_com_pyth-network_pyth-crosschain_git_main"
+        );
+    }
+
+    #[test]
+    fn resolve_git_source_bails_on_sui_until_phase_2c() {
+        let source = PackageSource::Git {
+            url: "https://example.com/x.git".into(),
+            rev: Some("main".into()),
+            branch: None,
+            tag: None,
+            subdir: None,
+        };
+        let scratch = std::env::temp_dir().join(format!(
+            "move-bindgen-git-resolver-sui-{}",
+            std::process::id()
+        ));
+        let err =
+            resolve_git_source(&source, &scratch, false, crate::config::Flavour::Sui).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("Sui flavour is not yet implemented"),
+            "expected the not-yet-implemented bail, got: {msg}",
         );
     }
 }

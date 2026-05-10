@@ -7,14 +7,20 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use iota_move_build::{BuildConfig as IotaBuildConfig, CompiledPackage, IotaPackageHooks};
 use iota_package_management::system_package_versions::latest_system_packages;
 use move_core_types::account_address::AccountAddress;
 use move_package::BuildConfig as MoveBuildConfig;
 
+use crate::config::Flavour;
+
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
+    /// Move chain flavour the build targets. Selects which build
+    /// chain (`iota_move_build` vs Sui's equivalent — landing in a
+    /// later phase) is invoked. Defaults to `Iota`.
+    pub flavour: Flavour,
     /// Forward move-package's `BUILDING X` / `INCLUDING DEPENDENCY X`
     /// chatter to stderr. Off by default — the CLI's `Reporter` already
     /// surfaces compile progress in cargo style, and the upstream
@@ -51,6 +57,7 @@ pub struct BuildOptions {
 impl Default for BuildOptions {
     fn default() -> Self {
         Self {
+            flavour: Flavour::Iota,
             print_diags_to_stderr: false,
             run_bytecode_verifier: false,
             dev_mode: false,
@@ -61,8 +68,19 @@ impl Default for BuildOptions {
     }
 }
 
-/// Build a Move package located at `path` (a directory containing `Move.toml`).
+/// Build a Move package located at `path` (a directory containing
+/// `Move.toml`). Dispatches to a flavour-specific implementation.
 pub(crate) fn build_package(path: &Path, opts: &BuildOptions) -> Result<CompiledPackage> {
+    match opts.flavour {
+        Flavour::Iota => build_package_iota(path, opts),
+        Flavour::Sui => bail!(
+            "Sui flavour is not yet implemented — runtime-sui crate lands in Phase 2c. \
+             See PLAN_SUI_COMPAT.md for status."
+        ),
+    }
+}
+
+fn build_package_iota(path: &Path, opts: &BuildOptions) -> Result<CompiledPackage> {
     move_package::package_hooks::register_package_hooks(Box::new(IotaPackageHooks));
 
     let config = MoveBuildConfig {
@@ -115,4 +133,27 @@ fn build_with_captured_stderr(cfg: IotaBuildConfig, path: &Path) -> Result<Compi
         let _ = std::io::stderr().write_all(&captured);
     }
     result.map_err(anyhow::Error::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_package_bails_on_sui_until_phase_2c() {
+        // Phase 2b: dispatch is in place but the Sui adapter isn't.
+        // Make sure we error early with a friendly message instead of
+        // mysteriously trying to drive `iota_move_build` against a
+        // Sui package.
+        let opts = BuildOptions {
+            flavour: Flavour::Sui,
+            ..Default::default()
+        };
+        let err = build_package(std::path::Path::new("/nonexistent"), &opts).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("Sui flavour is not yet implemented"),
+            "expected the not-yet-implemented bail, got: {msg}",
+        );
+    }
 }

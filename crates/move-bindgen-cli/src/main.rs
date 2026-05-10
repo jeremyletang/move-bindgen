@@ -119,12 +119,22 @@ enum Cmd {
     /// Create a starter move-bindgen.toml.
     ///
     /// Workspace-mode template, public git runtime, `framework_packages
-    /// = []` so Iota types beyond the runtime's well-known set work
-    /// out of the box. Refuses to overwrite without `--force`.
+    /// = []` so framework types beyond the runtime's well-known set
+    /// work out of the box. Refuses to overwrite without `--force`.
     Init {
         /// Target directory.
         #[arg(default_value = ".")]
         dir: PathBuf,
+        /// Move chain flavour to scaffold for.
+        ///
+        /// Recorded as `flavour = "..."` in the generated config and
+        /// drives which framework names the comment block references.
+        /// Note: today only `iota` actually builds end-to-end; `sui`
+        /// scaffolds the config but `install` / `build` will bail with
+        /// a "not yet implemented" message until the runtime-sui
+        /// crate lands (see PLAN_SUI_COMPAT.md).
+        #[arg(long, value_enum, default_value_t = move_bindgen::Flavour::Iota)]
+        flavour: move_bindgen::Flavour,
         /// Workspace name [default: <dir basename>-rs].
         ///
         /// Skips the `-rs` suffix when the basename already ends
@@ -213,9 +223,11 @@ fn make_reporter(quiet: bool, verbose: bool) -> Reporter {
 fn make_build_opts(
     overrides: &BTreeMap<String, AccountAddress>,
     reporter: &Reporter,
+    flavour: move_bindgen::Flavour,
 ) -> BuildOptions {
     let verbose = reporter.is_verbose();
     BuildOptions {
+        flavour,
         additional_named_addresses: overrides.clone(),
         print_diags_to_stderr: verbose,
         silence_warnings: !verbose,
@@ -263,9 +275,18 @@ fn main() -> anyhow::Result<()> {
             let cfg = Config::load(&config_path)?;
             check_config(&cfg, &input_dirs)?;
         }
-        Cmd::Init { dir, name, force } => {
+        Cmd::Init {
+            dir,
+            flavour,
+            name,
+            force,
+        } => {
             let pre_existed = config_path_in(&dir).is_file();
-            let opts = move_bindgen::InitOptions { name, force };
+            let opts = move_bindgen::InitOptions {
+                flavour,
+                name,
+                force,
+            };
             let written = move_bindgen::init(&dir, &opts)?;
             // `init` always emits — quiet would defeat the only feedback.
             // Keep the message style consistent with the reporter.
@@ -321,7 +342,10 @@ fn generate_zero_config(
     reporter.stage("Compiling", package.display().to_string());
     let bindings = move_bindgen::load_package_with_options(
         package,
-        &make_build_opts(&BTreeMap::new(), reporter),
+        // Zero-config has no manifest to consult, so flavour defaults
+        // to Iota. Sui zero-config will arrive once `runtime-sui` ships
+        // (Phase 2c) — until then, bail at the build layer.
+        &make_build_opts(&BTreeMap::new(), reporter, move_bindgen::Flavour::Iota),
     )?;
     let runtime = match runtime_path {
         Some(p) => RuntimeSpec::Path(PathBuf::from(p)),
@@ -401,8 +425,10 @@ fn generate_single_from_staging(
         .ok_or_else(|| anyhow::anyhow!("staging manifest has no packages"))?;
     let pkg_path = staging_root.join(&pkg.staged_path);
     reporter.stage("Compiling", &pkg.move_name);
-    let bindings =
-        move_bindgen::load_package_with_options(&pkg_path, &make_build_opts(overrides, reporter))?;
+    let bindings = move_bindgen::load_package_with_options(
+        &pkg_path,
+        &make_build_opts(overrides, reporter, manifest.flavour),
+    )?;
     let out_name = cfg
         .output_name
         .clone()
@@ -461,7 +487,7 @@ fn generate_workspace_from_staging(
         reporter.stage("Compiling", &pkg.move_name);
         let bindings = move_bindgen::load_package_with_options(
             &pkg_path,
-            &make_build_opts(overrides, reporter),
+            &make_build_opts(overrides, reporter, manifest.flavour),
         )?;
         let addr = bindings_address(&bindings);
         match peers.insert(addr, pkg.crate_name.clone()) {

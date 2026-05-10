@@ -17,6 +17,9 @@ toml.workspace = true
 sha2.workspace = true
 hex.workspace = true
 gag.workspace = true
+# `Flavour` derives `clap::ValueEnum` so the CLI can use it directly
+# in `--flavour` flags without parallel parsing logic.
+clap.workspace = true
 
 iota-move-build.workspace          = true
 iota-package-management.workspace  = true
