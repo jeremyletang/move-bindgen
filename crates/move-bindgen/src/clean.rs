@@ -56,8 +56,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let cfg = root.join("move-bindgen.toml");
         std::fs::write(&cfg, "stub").unwrap();
-        // staging_dir_for(<cfg>) -> <root>/.move-bindgen-staging when
-        // the file is exactly `move-bindgen.toml`. Materialise it.
+        // staging_dir_for(<cfg>) -> <root>/.move-bindgen/default/ for
+        // the canonical `move-bindgen.toml`. Materialise it.
         let staging = staging_dir_for(&cfg);
         std::fs::create_dir_all(&staging).unwrap();
         std::fs::write(staging.join("packages.json"), "{}").unwrap();

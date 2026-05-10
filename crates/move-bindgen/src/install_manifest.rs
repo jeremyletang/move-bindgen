@@ -8,7 +8,7 @@
 //! status).
 //!
 //! Format: pretty-printed JSON. Stable enough for users to read by hand
-//! when debugging — `cat .move-bindgen-exchange/packages.json` should be
+//! when debugging — `cat .move-bindgen/exchange/packages.json` should be
 //! immediately recognisable.
 
 use std::collections::BTreeMap;
