@@ -234,6 +234,7 @@ pub fn run(
 
     let manifest = InstallManifest {
         version: MANIFEST_VERSION,
+        flavour: cfg.flavour,
         config_digest,
         packages: staged,
         address_overrides,

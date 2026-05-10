@@ -412,6 +412,7 @@ fn generate_single_from_staging(
         .unwrap_or_else(|| cfg.config_dir.join(&out_name));
     let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &out_dir);
     let opts = move_bindgen::GenerateOptions {
+        flavour: manifest.flavour,
         runtime,
         crate_name_override: Some(pkg.crate_name.clone()),
         ..Default::default()
@@ -511,6 +512,7 @@ fn generate_workspace_from_staging(
         let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &crate_dir);
         let skip_modules = framework_skip_modules(&pkg.move_name);
         let opts = move_bindgen::GenerateOptions {
+            flavour: manifest.flavour,
             runtime,
             peers: peers.clone(),
             as_workspace_member: true,

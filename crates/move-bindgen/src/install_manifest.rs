@@ -28,6 +28,12 @@ pub const MANIFEST_VERSION: u32 = 2;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallManifest {
     pub version: u32,
+    /// Move chain flavour the install was run for. Replayed by
+    /// `generate` so codegen picks the right runtime crate name and
+    /// any flavour-specific behaviours. Defaults to `Iota` when
+    /// missing from older manifests.
+    #[serde(default)]
+    pub flavour: crate::config::Flavour,
     /// Hash of `move-bindgen.toml` contents at install time. `generate`
     /// re-hashes the live config and compares; any drift triggers a
     /// "re-run install" error. Format: `"sha256:<hex>"`.
@@ -177,6 +183,7 @@ mod tests {
         overrides.insert("fixed18".into(), "0xff00000000000004".into());
         let m = InstallManifest {
             version: MANIFEST_VERSION,
+            flavour: crate::config::Flavour::Iota,
             config_digest: "sha256:0000".into(),
             packages: vec![StagedPackage {
                 id: "exchange".into(),
@@ -205,6 +212,7 @@ mod tests {
     fn round_trip_git_entry() {
         let m = InstallManifest {
             version: MANIFEST_VERSION,
+            flavour: crate::config::Flavour::Iota,
             config_digest: "sha256:beef".into(),
             packages: vec![StagedPackage {
                 id: "pyth".into(),
@@ -236,6 +244,33 @@ mod tests {
             }
             _ => panic!("expected Git source"),
         }
+    }
+
+    #[test]
+    fn flavour_round_trips_and_defaults_to_iota() {
+        // Sui flavour explicitly set: round-trips through serde.
+        let m = InstallManifest {
+            version: MANIFEST_VERSION,
+            flavour: crate::config::Flavour::Sui,
+            config_digest: "sha256:0000".into(),
+            packages: vec![],
+            address_overrides: BTreeMap::new(),
+        };
+        let text = serde_json::to_string(&m).unwrap();
+        assert!(text.contains("\"flavour\":\"sui\""), "{}", text);
+        let back: InstallManifest = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.flavour, crate::config::Flavour::Sui);
+
+        // Older manifest with no `flavour` field: serde default kicks in,
+        // we get Iota. Mirrors what older `packages.json` files on disk
+        // would deserialise to.
+        let bare = serde_json::json!({
+            "version": MANIFEST_VERSION,
+            "config_digest": "sha256:0000",
+            "packages": [],
+        });
+        let parsed: InstallManifest = serde_json::from_value(bare).unwrap();
+        assert_eq!(parsed.flavour, crate::config::Flavour::Iota);
     }
 
     #[test]
