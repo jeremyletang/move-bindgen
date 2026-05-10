@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use anyhow::Context;
 use move_bindgen::{
     config_path_in, foreign_addresses_used, Bindings, BuildOptions, Config, OutputFormat, PeerDep,
-    PeerMap, RuntimeSpec,
+    PeerMap, Reporter, RuntimeSpec,
 };
 use move_core_types::account_address::AccountAddress;
 
@@ -57,22 +57,26 @@ enum Cmd {
         /// precedence).
         #[arg(long, default_value = "../../crates/move-bindgen-runtime")]
         runtime_path: String,
+        /// Suppress progress output. Errors still report to stderr.
+        #[arg(long, short = 'q')]
+        quiet: bool,
     },
     /// Load and validate a `move-bindgen.toml`. No code is written; this
     /// surfaces parse / shape / uniqueness errors and prints a summary of
     /// the resolved config.
     ///
-    /// `--input-folder` is repeatable. Each `[packages.*].path` is
-    /// resolved against each input folder in order; first hit wins.
-    /// Defaults to the config file's directory if no input folders are
+    /// `--input-dir` is repeatable. Each `[packages.*].path` is
+    /// resolved against each input dir in order; first hit wins.
+    /// Defaults to the config file's directory if no input dirs are
     /// passed.
     Check {
         /// Path to the config file. Defaults to `./move-bindgen.toml`.
         #[arg(long)]
         config: Option<PathBuf>,
         /// Where to look for the Move packages referenced by `[packages.*].path`.
-        #[arg(long = "input-folder")]
-        input_folders: Vec<PathBuf>,
+        /// Repeatable; first hit wins. Defaults to the config file's dir.
+        #[arg(long = "input-dir", short = 'i')]
+        input_dirs: Vec<PathBuf>,
     },
     /// Resolve every `[packages.*]` entry, copy/clone its source into a
     /// staging directory next to the config, rewrite Move.toml address
@@ -85,8 +89,11 @@ enum Cmd {
         config: Option<PathBuf>,
         /// Bases against which `[packages.*].path` entries resolve.
         /// Repeatable; first hit wins. Defaults to the config dir.
-        #[arg(long = "input-folder")]
-        input_folders: Vec<PathBuf>,
+        #[arg(long = "input-dir", short = 'i')]
+        input_dirs: Vec<PathBuf>,
+        /// Suppress progress output. Errors still report to stderr.
+        #[arg(long, short = 'q')]
+        quiet: bool,
     },
 }
 
@@ -102,27 +109,40 @@ fn main() -> anyhow::Result<()> {
             config,
             out,
             runtime_path,
-        } => match (package, config) {
-            (Some(pkg), None) => generate_zero_config(&pkg, out.as_deref(), &runtime_path)?,
-            (None, Some(cfg)) => generate_with_config(&cfg, out.as_deref())?,
-            _ => anyhow::bail!(
-                "pass either a positional <package> path or --config <toml>, but not both"
-            ),
-        },
-        Cmd::Check {
-            config,
-            input_folders,
+            quiet,
         } => {
+            let reporter = if quiet {
+                Reporter::quiet()
+            } else {
+                Reporter::new()
+            };
+            match (package, config) {
+                (Some(pkg), None) => {
+                    generate_zero_config(&pkg, out.as_deref(), &runtime_path, &reporter)?
+                }
+                (None, Some(cfg)) => generate_with_config(&cfg, out.as_deref(), &reporter)?,
+                _ => anyhow::bail!(
+                    "pass either a positional <package> path or --config <toml>, but not both"
+                ),
+            }
+        }
+        Cmd::Check { config, input_dirs } => {
             let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
             let cfg = Config::load(&config_path)?;
-            check_config(&cfg, &input_folders)?;
+            check_config(&cfg, &input_dirs)?;
         }
         Cmd::Install {
             config,
-            input_folders,
+            input_dirs,
+            quiet,
         } => {
             let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
-            move_bindgen::install(&config_path, &input_folders)?;
+            let reporter = if quiet {
+                Reporter::quiet()
+            } else {
+                Reporter::new()
+            };
+            move_bindgen::install(&config_path, &input_dirs, &reporter)?;
         }
     }
     Ok(())
@@ -132,7 +152,10 @@ fn generate_zero_config(
     package: &Path,
     out: Option<&Path>,
     runtime_path: &str,
+    reporter: &Reporter,
 ) -> anyhow::Result<()> {
+    let started = std::time::Instant::now();
+    reporter.stage("Compiling", package.display().to_string());
     let bindings = move_bindgen::load_package(package)?;
     let opts = move_bindgen::GenerateOptions {
         runtime: RuntimeSpec::Path(PathBuf::from(runtime_path)),
@@ -142,12 +165,25 @@ fn generate_zero_config(
     let out_dir = out
         .map(Path::to_path_buf)
         .unwrap_or_else(|| default_out_dir(package, &crate_.crate_name));
+    reporter.stage("Generating", &crate_.crate_name);
     write_crate(&out_dir, &crate_)?;
-    eprintln!("wrote crate to {}", out_dir.display());
+    reporter.stage(
+        "Finished",
+        format!(
+            "generating {} in {:.2}s",
+            crate_.crate_name,
+            started.elapsed().as_secs_f64()
+        ),
+    );
     Ok(())
 }
 
-fn generate_with_config(config_path: &Path, out: Option<&Path>) -> anyhow::Result<()> {
+fn generate_with_config(
+    config_path: &Path,
+    out: Option<&Path>,
+    reporter: &Reporter,
+) -> anyhow::Result<()> {
+    reporter.stage("Verifying", config_path.display().to_string());
     let cfg = Config::load(config_path)?;
     let staging_root = move_bindgen::staging_dir_for(config_path);
     let manifest = move_bindgen::InstallManifest::load(&staging_root)?;
@@ -155,11 +191,16 @@ fn generate_with_config(config_path: &Path, out: Option<&Path>) -> anyhow::Resul
     let overrides = parse_overrides(&manifest.address_overrides)?;
     match cfg.format {
         OutputFormat::SingleCrate => {
-            generate_single_from_staging(&cfg, &staging_root, &manifest, &overrides, out)
+            generate_single_from_staging(&cfg, &staging_root, &manifest, &overrides, out, reporter)
         }
-        OutputFormat::Workspace => {
-            generate_workspace_from_staging(&cfg, &staging_root, &manifest, &overrides, out)
-        }
+        OutputFormat::Workspace => generate_workspace_from_staging(
+            &cfg,
+            &staging_root,
+            &manifest,
+            &overrides,
+            out,
+            reporter,
+        ),
     }
 }
 
@@ -181,12 +222,15 @@ fn generate_single_from_staging(
     manifest: &move_bindgen::InstallManifest,
     overrides: &BTreeMap<String, AccountAddress>,
     out: Option<&Path>,
+    reporter: &Reporter,
 ) -> anyhow::Result<()> {
+    let started = std::time::Instant::now();
     let pkg = manifest
         .packages
         .first()
         .ok_or_else(|| anyhow::anyhow!("staging manifest has no packages"))?;
     let pkg_path = staging_root.join(&pkg.staged_path);
+    reporter.stage("Compiling", &pkg.move_name);
     let bindings = move_bindgen::load_package_with_options(
         &pkg_path,
         &BuildOptions {
@@ -208,8 +252,16 @@ fn generate_single_from_staging(
         ..Default::default()
     };
     let crate_ = move_bindgen::generate(&bindings, &opts)?;
+    reporter.stage("Generating", &crate_.crate_name);
     write_crate(&out_dir, &crate_)?;
-    eprintln!("wrote crate to {}", out_dir.display());
+    reporter.stage(
+        "Finished",
+        format!(
+            "generating {} in {:.2}s",
+            crate_.crate_name,
+            started.elapsed().as_secs_f64()
+        ),
+    );
     Ok(())
 }
 
@@ -219,7 +271,9 @@ fn generate_workspace_from_staging(
     manifest: &move_bindgen::InstallManifest,
     overrides: &BTreeMap<String, AccountAddress>,
     out: Option<&Path>,
+    reporter: &Reporter,
 ) -> anyhow::Result<()> {
+    let started = std::time::Instant::now();
     let workspace_name = cfg
         .output_name
         .clone()
@@ -238,6 +292,7 @@ fn generate_workspace_from_staging(
             continue;
         }
         let pkg_path = staging_root.join(&pkg.staged_path);
+        reporter.stage("Compiling", &pkg.move_name);
         let bindings = move_bindgen::load_package_with_options(
             &pkg_path,
             &BuildOptions {
@@ -293,10 +348,16 @@ fn generate_workspace_from_staging(
     std::fs::write(workspace_dir.join("Cargo.toml"), workspace_cargo)?;
     std::fs::write(workspace_dir.join(".gitignore"), "/target\n")?;
 
-    eprintln!(
-        "wrote workspace to {} ({} crates)",
-        workspace_dir.display(),
-        member_dirs.len()
+    reporter.stage(
+        "Generating",
+        format!("{workspace_name} ({} crates)", member_dirs.len()),
+    );
+    reporter.stage(
+        "Finished",
+        format!(
+            "generating {workspace_name} in {:.2}s",
+            started.elapsed().as_secs_f64()
+        ),
     );
     Ok(())
 }
