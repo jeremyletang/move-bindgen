@@ -25,6 +25,12 @@ const CONFIG_FILE_NAME: &str = "move-bindgen.toml";
 /// codegen time and routed through the runtime re-exports instead.
 pub const DEFAULT_FRAMEWORK_PACKAGES: &[&str] = &["Iota", "MoveStdlib"];
 
+/// Public git URL for `move-bindgen-runtime`. Used as the default
+/// runtime spec in `move-bindgen init` templates and zero-config
+/// `generate` invocations. Tracks `master` — pin via `rev` once we
+/// start cutting tagged releases.
+pub const DEFAULT_RUNTIME_GIT_URL: &str = "https://github.com/jeremyletang/move-bindgen.git";
+
 // -----------------------------------------------------------------------------
 // Public, validated config
 // -----------------------------------------------------------------------------
@@ -51,6 +57,20 @@ pub enum RuntimeSpec {
     },
     /// `version = "..."` (crates.io).
     Version(String),
+}
+
+impl RuntimeSpec {
+    /// Default for templates and zero-config use: a git dep on the
+    /// public move-bindgen repo, tracking master. Pin via `rev` once we
+    /// start cutting tagged releases.
+    pub fn default_git() -> Self {
+        RuntimeSpec::Git {
+            url: DEFAULT_RUNTIME_GIT_URL.to_string(),
+            rev: None,
+            branch: None,
+            tag: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

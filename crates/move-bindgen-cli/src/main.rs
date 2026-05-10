@@ -52,11 +52,13 @@ enum Cmd {
         /// (config mode).
         #[arg(long, short = 'o')]
         out: Option<PathBuf>,
-        /// Path dependency for `move-bindgen-runtime` in zero-config mode.
-        /// Ignored when `--config` is set (the config's runtime takes
-        /// precedence).
-        #[arg(long, default_value = "../../crates/move-bindgen-runtime")]
-        runtime_path: String,
+        /// Override `move-bindgen-runtime` with a local path. Useful
+        /// when developing the runtime alongside generated code. When
+        /// unset, the generated `Cargo.toml` depends on the public git
+        /// repo (master). Ignored when `--config` is set — the config's
+        /// runtime takes precedence.
+        #[arg(long)]
+        runtime_path: Option<String>,
         /// Suppress progress output. Errors still report to stderr.
         #[arg(long, short = 'q')]
         quiet: bool,
@@ -77,6 +79,16 @@ enum Cmd {
         /// Repeatable; first hit wins. Defaults to the config file's dir.
         #[arg(long = "input-dir", short = 'i')]
         input_dirs: Vec<PathBuf>,
+    },
+    /// Scaffold a starter `move-bindgen.toml` in `<dir>` (default `.`).
+    /// Generates a workspace-mode template with the public git runtime
+    /// preset; you fill in `[packages.*]` entries. Errors if a config
+    /// already exists at the target path.
+    Init {
+        /// Directory in which to create `move-bindgen.toml`. Defaults
+        /// to the current working directory.
+        #[arg(default_value = ".")]
+        dir: PathBuf,
     },
     /// Resolve every `[packages.*]` entry, copy/clone its source into a
     /// staging directory next to the config, rewrite Move.toml address
@@ -117,19 +129,35 @@ fn main() -> anyhow::Result<()> {
                 Reporter::new()
             };
             match (package, config) {
-                (Some(pkg), None) => {
-                    generate_zero_config(&pkg, out.as_deref(), &runtime_path, &reporter)?
-                }
-                (None, Some(cfg)) => generate_with_config(&cfg, out.as_deref(), &reporter)?,
-                _ => anyhow::bail!(
-                    "pass either a positional <package> path or --config <toml>, but not both"
+                // Both — clap should already reject this via `conflicts_with`,
+                // but guard explicitly so a future schema change doesn't
+                // produce a confusing fall-through.
+                (Some(_), Some(_)) => anyhow::bail!(
+                    "pass either a positional <package> path or --config <toml>, not both"
                 ),
+                (Some(pkg), None) => {
+                    generate_zero_config(&pkg, out.as_deref(), runtime_path.as_deref(), &reporter)?
+                }
+                // Either explicit --config or the default ./move-bindgen.toml.
+                // The neither-given case used to error; now it falls through to
+                // the same path `install` defaults to, matching user expectations.
+                (None, cfg) => {
+                    let cfg = cfg.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
+                    generate_with_config(&cfg, out.as_deref(), &reporter)?;
+                }
             }
         }
         Cmd::Check { config, input_dirs } => {
             let config_path = config.unwrap_or_else(|| config_path_in(std::path::Path::new(".")));
             let cfg = Config::load(&config_path)?;
             check_config(&cfg, &input_dirs)?;
+        }
+        Cmd::Init { dir } => {
+            let written = move_bindgen::init(&dir)?;
+            // `init` always emits — quiet would defeat the only feedback.
+            // Keep the message style consistent with the reporter.
+            let reporter = Reporter::new();
+            reporter.stage("Created", written.display().to_string());
         }
         Cmd::Install {
             config,
@@ -151,14 +179,18 @@ fn main() -> anyhow::Result<()> {
 fn generate_zero_config(
     package: &Path,
     out: Option<&Path>,
-    runtime_path: &str,
+    runtime_path: Option<&str>,
     reporter: &Reporter,
 ) -> anyhow::Result<()> {
     let started = std::time::Instant::now();
     reporter.stage("Compiling", package.display().to_string());
     let bindings = move_bindgen::load_package(package)?;
+    let runtime = match runtime_path {
+        Some(p) => RuntimeSpec::Path(PathBuf::from(p)),
+        None => RuntimeSpec::default_git(),
+    };
     let opts = move_bindgen::GenerateOptions {
-        runtime: RuntimeSpec::Path(PathBuf::from(runtime_path)),
+        runtime,
         ..Default::default()
     };
     let crate_ = move_bindgen::generate(&bindings, &opts)?;
