@@ -99,7 +99,7 @@ impl Default for GenerateOptions {
         Self {
             flavour: crate::config::Flavour::default(),
             runtime: crate::config::RuntimeSpec::Path(std::path::PathBuf::from(
-                "../../crates/move-bindgen-runtime",
+                "../../crates/move-bindgen-runtime-iota",
             )),
             peers: crate::PeerMap::new(),
             as_workspace_member: false,
@@ -165,6 +165,7 @@ pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<Generated
         &crate_name,
         &bindings.package_name,
         &opts.runtime,
+        opts.flavour,
         opts.as_workspace_member,
         &opts.peer_deps,
     );
@@ -224,6 +225,7 @@ fn render_cargo_toml(
     crate_name: &str,
     package_name: &str,
     runtime: &crate::config::RuntimeSpec,
+    flavour: crate::config::Flavour,
     as_workspace_member: bool,
     peer_deps: &[PeerDep],
 ) -> String {
@@ -246,7 +248,7 @@ fn render_cargo_toml(
         deps.push_str("serde.workspace = true\n");
         deps.push_str("bcs.workspace = true\n");
     } else {
-        deps.push_str(&render_runtime_dep_line(runtime));
+        deps.push_str(&render_runtime_dep_line(runtime, flavour));
         deps.push('\n');
         deps.push_str("serde = { version = \"1\", features = [\"derive\"] }\n");
         deps.push_str("bcs   = \"0.1\"\n");
@@ -270,18 +272,39 @@ fn render_cargo_toml(
     format!("{header}{deps}{footer}")
 }
 
-fn render_runtime_dep_line(spec: &crate::config::RuntimeSpec) -> String {
+/// Crate name the local `move-bindgen-runtime` alias resolves to,
+/// based on flavour. Generated `Cargo.toml`s use this in
+/// `package = "..."` so the `use move_bindgen_runtime::*;` import in
+/// generated source stays flavour-agnostic — only the alias target
+/// switches between flavours.
+fn runtime_package_name(flavour: crate::config::Flavour) -> &'static str {
+    match flavour {
+        crate::config::Flavour::Iota => "move-bindgen-runtime-iota",
+        crate::config::Flavour::Sui => "move-bindgen-runtime-sui",
+    }
+}
+
+fn render_runtime_dep_line(
+    spec: &crate::config::RuntimeSpec,
+    flavour: crate::config::Flavour,
+) -> String {
     use crate::config::RuntimeSpec;
+    let pkg = runtime_package_name(flavour);
     match spec {
-        RuntimeSpec::Path(p) => format!("move-bindgen-runtime = {{ path = \"{}\" }}", p.display()),
-        RuntimeSpec::Version(v) => format!("move-bindgen-runtime = \"{v}\""),
+        RuntimeSpec::Path(p) => format!(
+            "move-bindgen-runtime = {{ package = \"{pkg}\", path = \"{}\" }}",
+            p.display()
+        ),
+        RuntimeSpec::Version(v) => {
+            format!("move-bindgen-runtime = {{ package = \"{pkg}\", version = \"{v}\" }}")
+        }
         RuntimeSpec::Git {
             url,
             rev,
             branch,
             tag,
         } => {
-            let mut parts = vec![format!("git = \"{url}\"")];
+            let mut parts = vec![format!("package = \"{pkg}\""), format!("git = \"{url}\"")];
             if let Some(r) = rev {
                 parts.push(format!("rev = \"{r}\""));
             }

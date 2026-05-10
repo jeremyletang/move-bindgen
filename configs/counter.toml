@@ -8,7 +8,7 @@
 [output]
 format  = "single-crate"
 name    = "counter-rs"
-runtime = { path = "../crates/move-bindgen-runtime" }
+runtime = { path = "../crates/move-bindgen-runtime-iota" }
 
 [package]
 # Resolved against `--input-folder` (default: this config's directory).

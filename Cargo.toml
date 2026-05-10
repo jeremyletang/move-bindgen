@@ -3,8 +3,8 @@ resolver = "2"
 members = [
     "crates/move-bindgen",
     "crates/move-bindgen-cli",
-    "crates/move-bindgen-ext",
-    "crates/move-bindgen-runtime",
+    "crates/move-bindgen-ext-iota",
+    "crates/move-bindgen-runtime-iota",
 ]
 
 [workspace.package]
@@ -15,10 +15,17 @@ authors = ["jeremy <me@jeremyletang.com>"]
 repository = "https://github.com/jeremyletang/move-bindgen"
 
 [workspace.dependencies]
-# Internal crates
-move-bindgen         = { path = "crates/move-bindgen" }
-move-bindgen-runtime = { path = "crates/move-bindgen-runtime" }
-move-bindgen-ext     = { path = "crates/move-bindgen-ext" }
+# Internal crates.
+#
+# `move-bindgen-runtime` / `move-bindgen-ext` here are local *aliases*
+# (via Cargo's `package = ...`) that point at the IOTA-flavoured crates.
+# Internal Rust source can still write `use move_bindgen_runtime::*;`
+# regardless of flavour; only the alias target changes when we add Sui.
+move-bindgen              = { path = "crates/move-bindgen" }
+move-bindgen-runtime-iota = { path = "crates/move-bindgen-runtime-iota" }
+move-bindgen-ext-iota     = { path = "crates/move-bindgen-ext-iota" }
+move-bindgen-runtime      = { package = "move-bindgen-runtime-iota", path = "crates/move-bindgen-runtime-iota" }
+move-bindgen-ext          = { package = "move-bindgen-ext-iota", path = "crates/move-bindgen-ext-iota" }
 
 # Used by both the runtime and generated code
 serde           = { version = "1", features = ["derive"] }

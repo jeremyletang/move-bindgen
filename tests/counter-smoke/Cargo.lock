@@ -266,7 +266,7 @@ name = "counter-rs"
 version = "0.1.0"
 dependencies = [
  "bcs",
- "move-bindgen-runtime",
+ "move-bindgen-runtime-iota",
  "serde",
 ]
 
@@ -278,7 +278,7 @@ dependencies = [
  "iota-sdk-crypto",
  "iota-sdk-graphql-client",
  "iota-sdk-types",
- "move-bindgen-runtime",
+ "move-bindgen-runtime-iota",
  "tokio",
 ]
 
@@ -1455,7 +1455,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "move-bindgen-ext"
+name = "move-bindgen-ext-iota"
 version = "0.1.0"
 dependencies = [
  "base64ct",
@@ -1469,14 +1469,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "move-bindgen-runtime"
+name = "move-bindgen-runtime-iota"
 version = "0.1.0"
 dependencies = [
  "bcs",
  "iota-sdk-crypto",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
- "move-bindgen-ext",
+ "move-bindgen-ext-iota",
  "move-core-types",
  "primitive-types 0.14.0",
  "serde",

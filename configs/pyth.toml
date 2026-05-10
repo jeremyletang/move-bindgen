@@ -21,7 +21,7 @@ framework_packages = []
 [output]
 format  = "workspace"
 name    = "pyth-rs"
-runtime = { path = "../crates/move-bindgen-runtime" }
+runtime = { path = "../crates/move-bindgen-runtime-iota" }
 
 [packages.pyth]
 git        = "https://github.com/pyth-network/pyth-crosschain.git"

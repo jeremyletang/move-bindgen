@@ -1,11 +1,11 @@
 [package]
-name = "move-bindgen-ext"
+name = "move-bindgen-ext-iota"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Backend traits + GraphQL-client integration consumed by move-bindgen-runtime"
+description = "IOTA backend traits + GraphQL-client integration consumed by move-bindgen-runtime-iota"
 
 [dependencies]
 iota-sdk-types.workspace               = true

@@ -4464,7 +4464,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "move-bindgen-ext"
+name = "move-bindgen-ext-iota"
 version = "0.1.0"
 dependencies = [
  "base64ct",
@@ -4478,14 +4478,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "move-bindgen-runtime"
+name = "move-bindgen-runtime-iota"
 version = "0.1.0"
 dependencies = [
  "bcs",
  "iota-sdk-crypto",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
- "move-bindgen-ext",
+ "move-bindgen-ext-iota",
  "move-core-types",
  "primitive-types 0.14.0",
  "serde",
