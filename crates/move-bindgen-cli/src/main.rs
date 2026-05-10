@@ -303,10 +303,7 @@ fn main() -> anyhow::Result<()> {
                     reporter.stage("Removed", path.display().to_string());
                 }
                 move_bindgen::CleanOutcome::NotFound(path) => {
-                    reporter.stage(
-                        "Skipped",
-                        format!("{} (nothing to clean)", path.display()),
-                    );
+                    reporter.stage("Skipped", format!("{} (nothing to clean)", path.display()));
                 }
             }
         }

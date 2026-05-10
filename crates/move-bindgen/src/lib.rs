@@ -20,6 +20,7 @@ mod peer;
 mod reporter;
 
 pub use build::BuildOptions;
+pub use clean::{run as clean, CleanOutcome};
 pub use codegen::{generate, GenerateOptions, GeneratedCrate, PeerDep};
 pub use config::{
     config_path_in, staging_dir_for, Config, OutputFormat, PackageEntry, PackageSource,
@@ -28,7 +29,6 @@ pub use config::{
 pub use digest::{file_digest, source_dir_digest};
 pub use docs::DocMap;
 pub use git_resolver::resolve_git_source;
-pub use clean::{run as clean, CleanOutcome};
 pub use init::{run as init, InitOptions};
 pub use install::{run as install, verify_freshness};
 pub use install_manifest::{

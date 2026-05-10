@@ -40,7 +40,11 @@ mod tests {
     use super::*;
 
     fn tmp(seed: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("move-bindgen-clean-{}-{}", seed, std::process::id()))
+        std::env::temp_dir().join(format!(
+            "move-bindgen-clean-{}-{}",
+            seed,
+            std::process::id()
+        ))
     }
 
     #[test]
