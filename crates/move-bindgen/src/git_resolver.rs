@@ -35,8 +35,14 @@ use crate::config::PackageSource;
 /// Resolve a `PackageSource::Git` to a local directory containing
 /// `Move.toml`. `scratch_root` is a writeable dir where the synthetic
 /// probe manifest lives (used to drive the fetcher). Pass any
-/// disposable directory.
-pub fn resolve_git_source(source: &PackageSource, scratch_root: &Path) -> Result<PathBuf> {
+/// disposable directory. When `verbose`, move-package's progress
+/// output (clone/fetch lines) is forwarded to stderr; otherwise it's
+/// piped to `io::sink()`.
+pub fn resolve_git_source(
+    source: &PackageSource,
+    scratch_root: &Path,
+    verbose: bool,
+) -> Result<PathBuf> {
     let (url, rev_label, subdir) = match source {
         PackageSource::Git {
             url,
@@ -77,8 +83,13 @@ pub fn resolve_git_source(source: &PackageSource, scratch_root: &Path) -> Result
         ..Default::default()
     };
 
-    cfg.download_deps_for_package(&scratch, &mut std::io::sink())
-        .with_context(|| format!("fetching git source {url}"))?;
+    if verbose {
+        cfg.download_deps_for_package(&scratch, &mut std::io::stderr())
+            .with_context(|| format!("fetching git source {url}"))?;
+    } else {
+        cfg.download_deps_for_package(&scratch, &mut std::io::sink())
+            .with_context(|| format!("fetching git source {url}"))?;
+    }
 
     // Compute the local path move-package would have placed the dep at.
     let cache_root = git_cache_dir(url, rev_label);

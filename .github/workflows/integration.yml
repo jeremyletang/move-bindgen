@@ -79,8 +79,17 @@ jobs:
         # source type-checks against the current runtime. No `--locked`
         # because the crate is regenerated each run with no committed
         # `Cargo.lock` to lock against.
+        #
+        # `--runtime-path` overrides the CLI's default (a git dep on
+        # the public move-bindgen repo). Without this override, the
+        # generated `counter-rs/Cargo.toml` would pull `move-bindgen-runtime`
+        # from git master while `tests/counter-smoke/Cargo.toml` uses a
+        # path-dep on the in-repo runtime — same crate name, two
+        # different builds in one Cargo graph → type mismatches.
         run: |
-          ./target/debug/move-bindgen generate packages/counter -o generated/counter-rs
+          ./target/debug/move-bindgen generate packages/counter \
+              --runtime-path ../../crates/move-bindgen-runtime \
+              -o generated/counter-rs
           (cd generated/counter-rs && cargo check)
           (cd tests/counter-smoke && cargo test)
 

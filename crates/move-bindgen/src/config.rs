@@ -25,6 +25,12 @@ const CONFIG_FILE_NAME: &str = "move-bindgen.toml";
 /// codegen time and routed through the runtime re-exports instead.
 pub const DEFAULT_FRAMEWORK_PACKAGES: &[&str] = &["Iota", "MoveStdlib"];
 
+/// Public git URL for `move-bindgen-runtime`. Used as the default
+/// runtime spec in `move-bindgen init` templates and zero-config
+/// `generate` invocations. Tracks `master` — pin via `rev` once we
+/// start cutting tagged releases.
+pub const DEFAULT_RUNTIME_GIT_URL: &str = "https://github.com/jeremyletang/move-bindgen.git";
+
 // -----------------------------------------------------------------------------
 // Public, validated config
 // -----------------------------------------------------------------------------
@@ -51,6 +57,20 @@ pub enum RuntimeSpec {
     },
     /// `version = "..."` (crates.io).
     Version(String),
+}
+
+impl RuntimeSpec {
+    /// Default for templates and zero-config use: a git dep on the
+    /// public move-bindgen repo, tracking master. Pin via `rev` once we
+    /// start cutting tagged releases.
+    pub fn default_git() -> Self {
+        RuntimeSpec::Git {
+            url: DEFAULT_RUNTIME_GIT_URL.to_string(),
+            rev: None,
+            branch: None,
+            tag: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -112,25 +132,6 @@ impl Config {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
         Self::from_raw(raw, config_dir)
-    }
-
-    /// Resolve any `[packages.*]` entry's source to a local on-disk
-    /// directory containing `Move.toml`. Dispatches to the path
-    /// resolver (input-folder lookup) or the git resolver (drives
-    /// `move-package`'s fetcher) depending on the source variant.
-    pub fn resolve_source(
-        &self,
-        entry: &PackageEntry,
-        input_folders: &[PathBuf],
-        scratch_root: &Path,
-    ) -> Result<PathBuf> {
-        match &entry.source {
-            PackageSource::Path(_) => self.resolve_path_source(entry, input_folders),
-            PackageSource::Git { .. } => crate::git_resolver::resolve_git_source(
-                &entry.source,
-                &scratch_root.join(&entry.id),
-            ),
-        }
     }
 
     /// Path-only variant. Errors if the entry is git-sourced.

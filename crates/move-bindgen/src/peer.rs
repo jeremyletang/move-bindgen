@@ -12,7 +12,6 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use anyhow::{bail, Result};
 use move_binary_format::normalized::{Datatype, Module, Type};
 use move_core_types::{account_address::AccountAddress, identifier::Identifier};
 
@@ -31,28 +30,44 @@ pub struct PeerEntry {
     pub crate_name: String,
 }
 
+/// Outcome of [`PeerMap::insert`]. `Aliased` carries the canonical
+/// crate-name the address already maps to so the caller can surface
+/// it (e.g. via the reporter) and skip generating a redundant crate.
+#[derive(Debug, Clone)]
+pub enum InsertOutcome {
+    Inserted,
+    Aliased { canonical: String },
+}
+
 impl PeerMap {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Register a peer. Errors if `addr` is already registered.
-    pub fn insert(&mut self, addr: AccountAddress, crate_name: String) -> Result<()> {
+    /// Register a peer. First-wins: if `addr` is already registered,
+    /// returns `InsertOutcome::Aliased { canonical }` carrying the
+    /// existing crate name and leaves the map unchanged.
+    ///
+    /// Why first-wins: Move identifies types by `(address, module,
+    /// name)`. Two Move packages compiled against the same address
+    /// (e.g. `iota = "0x2"`) emit IR-equivalent types — they're
+    /// indistinguishable at the type level, so a single canonical
+    /// Rust crate covers references from anywhere. We elect one and
+    /// route everyone through it.
+    ///
+    /// If the address-sharing packages have *divergent* APIs (e.g. a
+    /// vendored Iota cut against a newer git Iota), missing items
+    /// surface as cargo errors downstream — that's the user's signal
+    /// to align framework versions, since we can't paper over
+    /// genuinely-divergent APIs.
+    pub fn insert(&mut self, addr: AccountAddress, crate_name: String) -> InsertOutcome {
         if let Some(prev) = self.by_address.get(&addr) {
-            bail!(
-                "two packages share address 0x{}: '{}' and '{}'.\n\
-                 \n\
-                 Each Move package needs a distinct address for codegen. Either:\n  \
-                   - publish the packages and set `[package].published-at` in each `Move.toml`, or\n  \
-                   - replace literal `\"0x0\"` placeholders in `[addresses]` with `\"_\"` so move-bindgen \
-                     can assign each a unique synthetic address.",
-                addr.short_str_lossless(),
-                prev.crate_name,
-                crate_name,
-            );
+            return InsertOutcome::Aliased {
+                canonical: prev.crate_name.clone(),
+            };
         }
         self.by_address.insert(addr, PeerEntry { crate_name });
-        Ok(())
+        InsertOutcome::Inserted
     }
 
     pub fn lookup(&self, addr: &AccountAddress) -> Option<&PeerEntry> {
