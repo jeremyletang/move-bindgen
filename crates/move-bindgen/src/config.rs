@@ -47,8 +47,7 @@ pub enum OutputFormat {
 /// and SDK family the generated code targets.
 ///
 /// Flavour is per-project. Two flavours don't mix in one workspace
-/// (different SDK type identities). Default is `Iota`; the Sui path
-/// is being introduced (see `PLAN_SUI_COMPAT.md`).
+/// (different SDK type identities). Default is `Iota`.
 #[derive(
     Debug,
     Clone,

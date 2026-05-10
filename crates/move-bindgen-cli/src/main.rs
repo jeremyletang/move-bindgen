@@ -129,10 +129,6 @@ enum Cmd {
         ///
         /// Recorded as `flavour = "..."` in the generated config and
         /// drives which framework names the comment block references.
-        /// Note: today only `iota` actually builds end-to-end; `sui`
-        /// scaffolds the config but `install` / `build` will bail with
-        /// a "not yet implemented" message until the runtime-sui
-        /// crate lands (see PLAN_SUI_COMPAT.md).
         #[arg(long, value_enum, default_value_t = move_bindgen::Flavour::Iota)]
         flavour: move_bindgen::Flavour,
         /// Workspace name [default: <dir basename>-rs].
@@ -342,9 +338,9 @@ fn generate_zero_config(
     reporter.stage("Compiling", package.display().to_string());
     let bindings = move_bindgen::load_package_with_options(
         package,
-        // Zero-config has no manifest to consult, so flavour defaults
-        // to Iota. Sui zero-config will arrive once `runtime-sui` ships
-        // (Phase 2c) — until then, bail at the build layer.
+        // Zero-config has no manifest to consult; flavour defaults to
+        // Iota. The Sui build path bails until its adapter lands, so
+        // zero-config Sui isn't reachable through this entry point.
         &make_build_opts(&BTreeMap::new(), reporter, move_bindgen::Flavour::Iota),
     )?;
     let runtime = match runtime_path {
@@ -474,7 +470,7 @@ fn generate_workspace_from_staging(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| cfg.config_dir.join(&workspace_name));
 
-    // Phase 1 — load every staged package, build the peer map keyed by
+    // Load every staged package and build the peer map keyed by
     // address. Framework-marked entries are skipped: the runtime owns
     // their types and ty.rs's well-known mappings handle the routing.
     let mut loaded = Vec::with_capacity(manifest.packages.len());
@@ -513,8 +509,8 @@ fn generate_workspace_from_staging(
         }
     }
 
-    // Phase 2 — codegen each member crate, computing per-crate peer
-    // deps by walking type references in its IR.
+    // Codegen each member crate, computing per-crate peer deps by
+    // walking type references in its IR.
     std::fs::create_dir_all(&workspace_dir)?;
     let mut member_dirs = Vec::with_capacity(loaded.len());
     for (pkg, bindings) in &loaded {
@@ -551,7 +547,7 @@ fn generate_workspace_from_staging(
         member_dirs.push(pkg.crate_name.clone());
     }
 
-    // Phase 3 — workspace-level Cargo.toml + .gitignore.
+    // Workspace-level Cargo.toml + .gitignore.
     let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &workspace_dir);
     let workspace_cargo = render_workspace_cargo_toml(&member_dirs, &runtime, manifest.flavour);
     std::fs::write(workspace_dir.join("Cargo.toml"), workspace_cargo)?;

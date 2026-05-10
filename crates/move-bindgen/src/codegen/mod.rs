@@ -52,10 +52,9 @@ pub struct GeneratedCrate {
 /// Knobs for `generate`.
 #[derive(Debug, Clone)]
 pub struct GenerateOptions {
-    /// Move chain flavour the bindings are being generated for.
-    /// Defaults to `Iota`. Phase 1 doesn't read this anywhere — it's
-    /// here so install/CLI can plumb it through ahead of the
-    /// flavour-aware codegen work in later phases.
+    /// Move chain flavour the bindings target. Drives the runtime
+    /// crate name in the generated `Cargo.toml`'s `package = "..."`
+    /// alias.
     pub flavour: crate::config::Flavour,
     /// How the generated `Cargo.toml` should reference
     /// `move-bindgen-runtime`. For path specs, the caller is responsible

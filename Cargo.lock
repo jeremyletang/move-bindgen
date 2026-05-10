@@ -910,6 +910,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f781dba93de3a5ef6dc5b17c9958b208f6f3f021623b360fb605ea51ce443f10"
 
 [[package]]
+name = "bnum"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "119771309b95163ec7aaf79810da82f7cd0599c19722d48b9c03894dca833966"
+
+[[package]]
 name = "bs58"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3688,7 +3694,7 @@ dependencies = [
  "base64ct",
  "bcs",
  "blake2",
- "bnum",
+ "bnum 0.12.1",
  "bs58 0.5.1",
  "bytestring",
  "derive_more 2.1.1",
@@ -4479,6 +4485,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "move-bindgen-ext-sui"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "primitive-types 0.14.0",
+ "serde",
+ "sui-sdk-types",
+ "sui-transaction-builder",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "move-bindgen-runtime-iota"
 version = "0.1.0"
 dependencies = [
@@ -4490,6 +4508,20 @@ dependencies = [
  "move-core-types",
  "primitive-types 0.14.0",
  "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "move-bindgen-runtime-sui"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "move-bindgen-ext-sui",
+ "move-core-types",
+ "primitive-types 0.14.0",
+ "serde",
+ "sui-sdk-types",
+ "sui-transaction-builder",
  "thiserror 2.0.18",
 ]
 
@@ -7251,6 +7283,38 @@ name = "subtle-ng"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "734676eb262c623cec13c3155096e08d1f8f29adce39ba17948b18dad1e54142"
+
+[[package]]
+name = "sui-sdk-types"
+version = "0.3.1"
+source = "git+https://github.com/mystenlabs/sui-rust-sdk.git?rev=355d9ddf1c2e939fcc378a9733800e7d2caf4612#355d9ddf1c2e939fcc378a9733800e7d2caf4612"
+dependencies = [
+ "base64ct",
+ "bcs",
+ "blake2",
+ "bnum 0.13.0",
+ "bs58 0.5.1",
+ "bytes",
+ "bytestring",
+ "itertools 0.14.0",
+ "roaring",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_with",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "sui-transaction-builder"
+version = "0.3.1"
+source = "git+https://github.com/mystenlabs/sui-rust-sdk.git?rev=355d9ddf1c2e939fcc378a9733800e7d2caf4612#355d9ddf1c2e939fcc378a9733800e7d2caf4612"
+dependencies = [
+ "bcs",
+ "serde",
+ "sui-sdk-types",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "syn"

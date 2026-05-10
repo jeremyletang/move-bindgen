@@ -73,10 +73,7 @@ impl Default for BuildOptions {
 pub(crate) fn build_package(path: &Path, opts: &BuildOptions) -> Result<CompiledPackage> {
     match opts.flavour {
         Flavour::Iota => build_package_iota(path, opts),
-        Flavour::Sui => bail!(
-            "Sui flavour is not yet implemented — runtime-sui crate lands in Phase 2c. \
-             See PLAN_SUI_COMPAT.md for status."
-        ),
+        Flavour::Sui => bail!("Sui flavour is not yet implemented"),
     }
 }
 
@@ -140,8 +137,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_package_bails_on_sui_until_phase_2c() {
-        // Phase 2b: dispatch is in place but the Sui adapter isn't.
+    fn build_package_bails_on_unimplemented_sui() {
         // Make sure we error early with a friendly message instead of
         // mysteriously trying to drive `iota_move_build` against a
         // Sui package.

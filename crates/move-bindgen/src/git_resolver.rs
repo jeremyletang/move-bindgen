@@ -34,8 +34,8 @@ use crate::config::PackageSource;
 
 /// Resolve a `PackageSource::Git` to a local directory containing
 /// `Move.toml`. Dispatches on `flavour`: the Iota path uses
-/// `iota_move_build`'s implicit-deps + IOTA's `move-package` fork; the
-/// Sui path bails until Phase 2c lands the corresponding adapter.
+/// `iota_move_build`'s implicit-deps + IOTA's `move-package` fork.
+/// The Sui path is not yet implemented — `bail`s with a clear message.
 ///
 /// `scratch_root` is a writeable dir where the synthetic probe
 /// manifest lives (used to drive the fetcher). When `verbose`,
@@ -49,10 +49,7 @@ pub fn resolve_git_source(
 ) -> Result<PathBuf> {
     match flavour {
         crate::config::Flavour::Iota => resolve_git_source_iota(source, scratch_root, verbose),
-        crate::config::Flavour::Sui => bail!(
-            "Sui flavour is not yet implemented — git resolution for Sui packages \
-             lands in Phase 2c. See PLAN_SUI_COMPAT.md for status."
-        ),
+        crate::config::Flavour::Sui => bail!("Sui flavour is not yet implemented"),
     }
 }
 
@@ -208,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_git_source_bails_on_sui_until_phase_2c() {
+    fn resolve_git_source_bails_on_unimplemented_sui() {
         let source = PackageSource::Git {
             url: "https://example.com/x.git".into(),
             rev: Some("main".into()),

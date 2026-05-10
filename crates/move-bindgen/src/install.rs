@@ -95,18 +95,19 @@ pub fn run(
     let mut used_basenames: BTreeSet<String> = BTreeSet::new();
     let mut used_ids: BTreeSet<String> = BTreeSet::new();
     let mut used_crate_names: BTreeMap<String, String> = BTreeMap::new();
-    // source_key → staging basename. Phase 2 uses this to rewrite each
-    // dep edge in a staged Move.toml from its original `local = "..."`
-    // / `git = "..."` form into a sibling reference like
-    // `local = "../<basename>"`.
+    // source_key → staging basename. The manifest-rewriting pass below
+    // uses this to rewrite each dep edge in a staged Move.toml from
+    // its original `local = "..."` / `git = "..."` form into a sibling
+    // reference like `local = "../<basename>"`.
     let mut staged_basenames: BTreeMap<String, String> = BTreeMap::new();
 
-    // Phase 1: walk the worklist. Stage each package under its source
+    // Walk the worklist. Stage each package under its source
     // directory's basename — NOT the [packages.X] id. Move.toml-level
     // relative paths between packages (e.g. `Iota.local =
-    // "../iota-framework"`) only become valid after phase 2 rewrites
-    // them to point at the staged sibling layout, but we use basenames
-    // because they line up with the typical authored form.
+    // "../iota-framework"`) only become valid after the
+    // manifest-rewriting pass below points them at the staged sibling
+    // layout, but we use basenames because they line up with the
+    // typical authored form.
     while let Some(item) = worklist.pop_front() {
         let key = source_key(&item.source);
         if !staged_keys.insert(key.clone()) {
@@ -207,7 +208,7 @@ pub fn run(
         });
     }
 
-    // Phase 2: rewrite each staged Move.toml so it builds against the
+    // Rewrite each staged Move.toml so it builds against the
     // flattened staging layout. One pass via `toml::Value` handles all
     // three edits at once:
     //   - strip [dev-dependencies] / [dev-addresses] (we never staged
