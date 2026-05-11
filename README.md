@@ -16,6 +16,10 @@ cargo build -p move-bindgen-cli
 ./target/debug/move-bindgen dump packages/counter-iota
 ```
 
+The full quickstart — generating bindings, calling a function,
+inspecting a PTB offline — lives in [`book/`](book/). Build it
+with `mdbook serve book` for a live-reload preview.
+
 The example under `packages/counter-iota/` is a small multi-module
 package covering structs, enums, generics with phantom and ability
 bounds, constants, references, and the four function visibilities —

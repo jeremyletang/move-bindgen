@@ -19,6 +19,9 @@ Move.lock
 # config (`<config-dir>/.move-bindgen-<config-stem>/`).
 .move-bindgen
 
+# mdBook build output
+/book/book
+
 # Editors / OS
 .DS_Store
 .idea/
