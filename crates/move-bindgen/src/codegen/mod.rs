@@ -121,10 +121,15 @@ pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<Generated
         .map(|m| m.id.address)
         .unwrap_or(AccountAddress::ZERO);
 
-    let crate_name = opts
-        .crate_name_override
-        .clone()
-        .unwrap_or_else(|| format!("{}-rs", bindings.package_name));
+    // Move package names commonly use snake_case (`counter_iota`);
+    // Rust crate names conventionally use kebab-case
+    // (`counter-iota-rs`). Translate `_` → `-` when deriving the
+    // default so the generated `Cargo.toml`'s `name` is a valid
+    // canonical Cargo package name. `crate_name_override` is left
+    // alone — explicit user config wins.
+    let crate_name = opts.crate_name_override.clone().unwrap_or_else(|| {
+        format!("{}-rs", bindings.package_name.replace('_', "-"))
+    });
 
     // Per-module sources. Skip modules with no items to emit — they'd
     // produce empty .rs files.
