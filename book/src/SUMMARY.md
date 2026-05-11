@@ -11,6 +11,8 @@
 # Core concepts
 
 - [PtbBuilder](concepts/ptb-builder.md)
+- [Type mapping](concepts/type-mapping.md)
+- [Argument traits](concepts/argument-traits.md)
 
 # Workspace projects
 
