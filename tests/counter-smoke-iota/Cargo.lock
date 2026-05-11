@@ -1488,6 +1488,7 @@ dependencies = [
  "iota-sdk-crypto",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
+ "move-bindgen-ext-core",
  "move-bindgen-ext-iota",
  "move-core-types",
  "primitive-types 0.14.0",

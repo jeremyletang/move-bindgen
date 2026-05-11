@@ -16,6 +16,7 @@ move-core-types.workspace     = true
 sui-sdk-types.workspace       = true
 sui-transaction-builder.workspace = true
 move-bindgen-ext-sui.workspace = true
+move-bindgen-ext-core.workspace = true
 
 [lints]
 workspace = true

@@ -629,6 +629,7 @@ name = "move-bindgen-runtime-sui"
 version = "0.1.0"
 dependencies = [
  "bcs",
+ "move-bindgen-ext-core",
  "move-bindgen-ext-sui",
  "move-core-types",
  "primitive-types 0.14.0",
