@@ -227,22 +227,35 @@ fn move_type_impl(
     let module_name = module.id.name.as_str();
     let type_name_s = type_name.as_str();
 
-    let type_params = if g.names.is_empty() {
-        quote!(Vec::new())
+    let decl = &g.decl;
+    let args = &g.args;
+
+    // For non-generic types, the trait's default `type_tag` (which
+    // calls `Self::type_params(addrs)` and looks up the package address
+    // in `addrs`) is exactly what we want — no method overrides needed.
+    // Generic types need to override `type_params` to recurse into each
+    // type argument.
+    if g.names.is_empty() {
+        quote! {
+            impl MoveType for #name {
+                type Package = super::Package;
+                const MODULE: &'static str = #module_name;
+                const NAME: &'static str = #type_name_s;
+            }
+        }
     } else {
         let parts = g
             .names
             .iter()
-            .map(|n| quote! { <#n as MoveType>::type_tag() });
-        quote!(vec![ #( #parts ),* ])
-    };
-
-    let decl = &g.decl;
-    let args = &g.args;
-    quote! {
-        impl #decl MoveType for #name #args {
-            fn type_tag() -> TypeTag {
-                make_struct_tag(super::PACKAGE_ID, #module_name, #type_name_s, #type_params)
+            .map(|n| quote! { <#n as MoveType>::type_tag(addrs) });
+        quote! {
+            impl #decl MoveType for #name #args {
+                type Package = super::Package;
+                const MODULE: &'static str = #module_name;
+                const NAME: &'static str = #type_name_s;
+                fn type_params(addrs: &impl PackageAddrs) -> Vec<TypeTag> {
+                    vec![ #( #parts ),* ]
+                }
             }
         }
     }

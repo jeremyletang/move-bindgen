@@ -5755,6 +5755,7 @@ dependencies = [
  "iota-sdk-graphql-client",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
+ "primitive-types 0.14.0",
  "serde",
  "thiserror 2.0.18",
  "tokio",

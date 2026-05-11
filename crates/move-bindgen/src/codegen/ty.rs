@@ -24,9 +24,13 @@ pub const STD_ADDRESS: AccountAddress = {
 /// Resolution context: every Move type reference is interpreted relative to
 /// "where I'm being emitted from".
 pub struct TypeCtx<'a> {
-    /// Address the package being generated lives at. Datatypes at this
-    /// address are *internal* and emitted as `super::module::Name`.
-    pub package_addr: AccountAddress,
+    /// Build-time address of the package being generated. Set by
+    /// `additional_named_addresses` at build, encoded in every
+    /// generated module's bytecode. Datatypes at this address are
+    /// *internal* and emitted as `super::module::Name`. Not the same
+    /// thing as the on-chain `published_at` — that one is resolved at
+    /// runtime via `b.package_id::<super::Package>()`.
+    pub build_addr: AccountAddress,
     /// Module currently being emitted (so we can collapse `super::self::X`
     /// to bare `X`).
     pub current_module: &'a Identifier,
@@ -110,7 +114,7 @@ fn rust_datatype(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
         }
     }
 
-    if module_addr == ctx.package_addr {
+    if module_addr == ctx.build_addr {
         let type_ident = format_ident!("{type_name}");
         if dt.module.name == *ctx.current_module {
             return Ok(quote!(#type_ident #generics));
@@ -137,7 +141,7 @@ fn rust_datatype(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
     )
 }
 
-/// `T::type_tag()` for a type — used to fill in `MoveCall.type_arguments`.
+/// `T::type_tag(b)` for a type — used to fill in `MoveCall.type_arguments`.
 /// Returns the `TypeTag`-building expression as a token stream.
 #[allow(dead_code)] // wired up by the call-codegen phase
 pub fn type_tag_expr(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
@@ -157,12 +161,12 @@ pub fn type_tag_expr(ty: &Type<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
         }
         Type::TypeParameter(idx) => {
             let ident = format_ident!("T{}", *idx);
-            quote!(<#ident as MoveType>::type_tag())
+            quote!(<#ident as MoveType>::type_tag(b))
         }
         Type::Reference(_, _) => bail!("references have no TypeTag"),
         Type::Datatype(_) => {
             let rust = rust_type(ty, ctx)?;
-            quote!(<#rust as MoveType>::type_tag())
+            quote!(<#rust as MoveType>::type_tag(b))
         }
     })
 }

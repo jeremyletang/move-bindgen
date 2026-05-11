@@ -29,17 +29,139 @@ pub type ObjectId = Address;
 // MoveType: maps a Rust type to its Move TypeTag.
 // -----------------------------------------------------------------------------
 
-/// Returns the Move type tag for a Rust type. Used by codegen to feed
-/// generic type parameters into PTB calls — `<T as MoveType>::type_tag()`.
+/// Marker type used by `MoveType` impls that don't belong to a
+/// generated package (primitives, framework types, etc.). Looking up a
+/// `NoPackage` address in `PackageAddrs` is a programmer error — those
+/// impls override `type_tag` and never call the trait's default body.
+pub struct NoPackage;
+
+/// Runtime map from a generated `Package` marker type to its on-chain
+/// address. Both [`PtbBuilder`] (PTB calls) and [`PackageRegistry`]
+/// (read-only callers without a builder) implement this so generated
+/// code can ask "what address is `MyPackage` at right now?".
+pub trait PackageAddrs {
+    /// Return the on-chain address registered for `P`. Panics if
+    /// the caller never registered `P`.
+    fn package_id<P: 'static>(&self) -> Address;
+}
+
+/// Free-standing package address store for non-PTB callers (event
+/// decoders, object readers, BCS deserialization, etc.).
+///
+/// PTB call sites use `PtbBuilder::with_package` to register
+/// addresses; the same machinery here lets read-only code build a
+/// short-lived `PackageRegistry` and pass it to `T::type_tag`.
+#[derive(Default)]
+pub struct PackageRegistry {
+    map: std::collections::HashMap<std::any::TypeId, Address>,
+}
+
+impl PackageRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Builder-style registration. Returns `self` for chaining:
+    /// `PackageRegistry::new().with::<P>(addr).with::<Q>(addr2)`.
+    pub fn with<P: 'static>(mut self, addr: Address) -> Self {
+        self.map.insert(std::any::TypeId::of::<P>(), addr);
+        self
+    }
+
+    /// Single-package shortcut: `PackageRegistry::at::<P>(addr)`.
+    pub fn at<P: 'static>(addr: Address) -> Self {
+        Self::new().with::<P>(addr)
+    }
+}
+
+impl PackageAddrs for PackageRegistry {
+    fn package_id<P: 'static>(&self) -> Address {
+        *self.map.get(&std::any::TypeId::of::<P>()).unwrap_or_else(|| {
+            panic!(
+                "PackageRegistry: no address registered for {}",
+                std::any::type_name::<P>(),
+            )
+        })
+    }
+}
+
+/// Maps a Rust type to its Move `TypeTag`.
+///
+/// Each generated datatype pins itself to a `Package` marker; codegen
+/// asks the supplied `PackageAddrs` (a `PtbBuilder` or a free-standing
+/// `PackageRegistry`) for the runtime address at the call site, so the
+/// same generated bindings can target multiple deployments without
+/// rebuilding.
 pub trait MoveType {
-    fn type_tag() -> TypeTag;
+    /// Package marker. Codegen emits a unit `pub struct Package;` in
+    /// each generated crate's `lib.rs` and points all its datatypes at
+    /// it. Primitives / framework types use [`NoPackage`].
+    type Package: 'static;
+    /// Move module name, e.g. `"counter"`. Empty for primitives.
+    const MODULE: &'static str;
+    /// Move datatype name, e.g. `"Counter"`. Empty for primitives.
+    const NAME: &'static str;
+
+    /// Type parameters of the datatype, computed against the supplied
+    /// address map. Default = no parameters (non-generic datatypes).
+    fn type_params(_addrs: &impl PackageAddrs) -> Vec<TypeTag> {
+        Vec::new()
+    }
+
+    /// Build the `TypeTag` against the supplied address map. The
+    /// default implementation works for any datatype that pins a
+    /// `Package`; primitives override it to return their leaf tag
+    /// directly.
+    fn type_tag(addrs: &impl PackageAddrs) -> TypeTag {
+        crate::make_struct_tag_export(
+            addrs.package_id::<Self::Package>(),
+            Self::MODULE,
+            Self::NAME,
+            Self::type_params(addrs),
+        )
+    }
+
+    /// Convenience for callers who already have the package address
+    /// in hand. Defaults to building a single-package registry on the
+    /// fly; impls with `Package = NoPackage` (primitives, framework
+    /// types) override this — there's no package to register.
+    fn type_tag_at(addr: Address) -> TypeTag
+    where
+        Self: Sized,
+    {
+        let reg = PackageRegistry::at::<Self::Package>(addr);
+        Self::type_tag(&reg)
+    }
+}
+
+/// Helper used by the default `MoveType::type_tag` impl. Lives here so
+/// the trait can refer to it without runtime-sui having to re-export
+/// an extra symbol. Mirrors `runtime-sui::make_struct_tag`.
+pub fn make_struct_tag_export(
+    addr: Address,
+    module: &str,
+    name: &str,
+    params: Vec<TypeTag>,
+) -> TypeTag {
+    TypeTag::Struct(Box::new(sui_sdk_types::StructTag::new(
+        addr,
+        sui_sdk_types::Identifier::new(module)
+            .expect("static module name is a valid Move identifier"),
+        sui_sdk_types::Identifier::new(name)
+            .expect("static datatype name is a valid Move identifier"),
+        params,
+    )))
 }
 
 macro_rules! impl_move_type_primitive {
     ($($ty:ty => $tag:ident),* $(,)?) => {
         $(
             impl MoveType for $ty {
-                fn type_tag() -> TypeTag { TypeTag::$tag }
+                type Package = NoPackage;
+                const MODULE: &'static str = "";
+                const NAME: &'static str = "";
+                fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::$tag }
+                fn type_tag_at(_: Address) -> TypeTag { TypeTag::$tag }
             }
         )*
     };
@@ -55,28 +177,41 @@ impl_move_type_primitive! {
 }
 
 impl MoveType for U256 {
-    fn type_tag() -> TypeTag {
-        TypeTag::U256
-    }
+    type Package = NoPackage;
+    const MODULE: &'static str = "";
+    const NAME: &'static str = "";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::U256 }
+    fn type_tag_at(_: Address) -> TypeTag { TypeTag::U256 }
 }
 
 impl MoveType for Address {
-    fn type_tag() -> TypeTag {
-        TypeTag::Address
-    }
+    type Package = NoPackage;
+    const MODULE: &'static str = "";
+    const NAME: &'static str = "";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::Address }
+    fn type_tag_at(_: Address) -> TypeTag { TypeTag::Address }
 }
 
 impl MoveType for String {
     // Move's `0x1::string::String` is `vector<u8>` on the wire; the SDK's
     // intent for String→type_tag is the same.
-    fn type_tag() -> TypeTag {
+    type Package = NoPackage;
+    const MODULE: &'static str = "";
+    const NAME: &'static str = "";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        TypeTag::Vector(Box::new(TypeTag::U8))
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
         TypeTag::Vector(Box::new(TypeTag::U8))
     }
 }
 
 impl<T: MoveType> MoveType for Vec<T> {
-    fn type_tag() -> TypeTag {
-        TypeTag::Vector(Box::new(T::type_tag()))
+    type Package = NoPackage;
+    const MODULE: &'static str = "";
+    const NAME: &'static str = "";
+    fn type_tag(addrs: &impl PackageAddrs) -> TypeTag {
+        TypeTag::Vector(Box::new(T::type_tag(addrs)))
     }
 }
 

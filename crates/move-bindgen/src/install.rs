@@ -122,7 +122,17 @@ pub fn run(
         // keeps them in separate dirs without forcing the user to name
         // them manually.
         let raw_basename = source_basename(&source_root, &entry_label);
-        let basename = unique_basename(&raw_basename, &used_basenames);
+        // For id-less (auto-discovered) entries, the basename also
+        // becomes the entry_id. Avoid both basename and entry_id
+        // collisions in one pass so a transitive dep whose source dir
+        // happens to share a name with an explicit `[packages.<id>]`
+        // (e.g. pyth_lazer's `lazer/contracts/sui` subdir vs our
+        // `[packages.sui]`) gets a unique suffix instead of erroring.
+        let basename = if item.id.is_none() {
+            unique_basename_against(&raw_basename, &used_basenames, Some(&used_ids))
+        } else {
+            unique_basename(&raw_basename, &used_basenames)
+        };
         used_basenames.insert(basename.clone());
 
         let entry_id = item.id.clone().unwrap_or_else(|| basename.clone());
@@ -225,6 +235,7 @@ pub fn run(
             &staging_root.join(&rec.staged.staged_path).join("Move.toml"),
             &rec.source_root,
             &staged_basenames,
+            is_canonical_framework(&rec.staged.move_name),
         )?;
     }
 
@@ -435,6 +446,23 @@ fn scratch_id(item: &WorkItem) -> String {
 /// component of its resolved source directory. Falls back to the
 /// supplied label if the source has no usable basename (extremely
 /// unlikely — implies the source resolves to `/`).
+/// Move packages whose `[addresses]` entries are part of the on-chain
+/// framework identity and must NOT be rewritten to the `_` placeholder.
+/// Rewriting `iota = "0x2"` → `"_"` makes downstream packages reject
+/// `iota::object::UID` as not-from-`iota::object::new`, since the
+/// framework ends up compiled at a synthetic `0xff…` address.
+///
+/// Distinct from `Config::framework_packages` — that one controls
+/// codegen routing (skip vs emit-as-peer). The decision here is solely
+/// about whether the Move source is part of the canonical framework.
+fn is_canonical_framework(move_name: &str) -> bool {
+    matches!(
+        move_name,
+        "Iota" | "IotaSystem" | "MoveStdlib" | "Stardust" |
+        "Sui" | "SuiSystem" | "Bridge" | "DeepBook"
+    )
+}
+
 fn source_basename(source_root: &Path, fallback: &str) -> String {
     source_root
         .file_name()
@@ -447,13 +475,25 @@ fn source_basename(source_root: &Path, fallback: &str) -> String {
 /// verbatim; otherwise append `-2`, `-3`, … until a free slot is
 /// found. The counter is open-ended so this never fails.
 fn unique_basename(raw: &str, used: &BTreeSet<String>) -> String {
-    if !used.contains(raw) {
+    unique_basename_against(raw, used, None)
+}
+
+/// Like [`unique_basename`] but also avoids any string in `extra` (the
+/// existing entry_id set). Used for auto-discovered entries, whose
+/// `entry_id` derives from the chosen basename.
+fn unique_basename_against(
+    raw: &str,
+    used: &BTreeSet<String>,
+    extra: Option<&BTreeSet<String>>,
+) -> String {
+    let taken = |s: &str| used.contains(s) || extra.map(|e| e.contains(s)).unwrap_or(false);
+    if !taken(raw) {
         return raw.to_string();
     }
     let mut suffix: u32 = 2;
     loop {
         let candidate = format!("{raw}-{suffix}");
-        if !used.contains(&candidate) {
+        if !taken(&candidate) {
             return candidate;
         }
         suffix += 1;
@@ -554,6 +594,7 @@ fn rewrite_staged_manifest(
     staged_move_toml: &Path,
     parent_source_root: &Path,
     staged_basenames: &BTreeMap<String, String>,
+    framework: bool,
 ) -> Result<()> {
     let text = std::fs::read_to_string(staged_move_toml)
         .with_context(|| format!("reading {}", staged_move_toml.display()))?;
@@ -569,15 +610,79 @@ fn rewrite_staged_manifest(
     table.remove("dev-dependencies");
     table.remove("dev-addresses");
 
-    if let Some(addrs) = table
-        .get_mut("addresses")
-        .and_then(toml::Value::as_table_mut)
-    {
-        for (_name, val) in addrs.iter_mut() {
-            if val.as_str() == Some("0x0") {
+    // Address rewrite: only for non-framework packages.
+    //
+    // Framework packages (`Iota`, `Sui`, `MoveStdlib`, …) have
+    // canonical fixed addresses (`0x1`, `0x2`, …) that downstream
+    // packages reference by their on-chain identity. Rewriting them
+    // to `_` would make the framework compile at a synthetic address
+    // and break every dep that references `sui::tx_context::TxContext`
+    // / `iota::tx_context::TxContext`.
+    //
+    // For everything else (user packages, published deps like Pyth)
+    // we force every named address to `_` so the synthetic-address
+    // override pass drives the final value. Packages with hard-coded
+    // published addresses would otherwise compile against their real
+    // mainnet address, and codegen's peer map — which keys on the
+    // synthetic addresses we assign — wouldn't recognize the resulting
+    // bytecode references.
+    if !framework {
+        // Read the package name first; some packages (predict,
+        // pyth_lazer) lack an `[addresses]` block entirely and rely
+        // on Move's "address name = package name" default. We have to
+        // inject an explicit `<pkg> = "_"` entry so the override pass
+        // sees something to synthesise.
+        //
+        // The Move convention is to use the lowercase form for the
+        // address key even when `[package].name` is capitalised
+        // (e.g. `name = "Pyth"` pairs with `[addresses].pyth = "…"`).
+        let pkg_addr_name = table
+            .get("package")
+            .and_then(toml::Value::as_table)
+            .and_then(|p| p.get("name"))
+            .and_then(toml::Value::as_str)
+            .map(|s| s.to_lowercase());
+
+        // Ensure the [addresses] block exists.
+        if !table.contains_key("addresses") {
+            table.insert(
+                "addresses".to_string(),
+                toml::Value::Table(toml::value::Table::new()),
+            );
+        }
+        if let Some(addrs) = table
+            .get_mut("addresses")
+            .and_then(toml::Value::as_table_mut)
+        {
+            // Force every named address to `_`.
+            for (_name, val) in addrs.iter_mut() {
                 *val = toml::Value::String("_".into());
             }
+            // Make sure the package's own address-name is present so
+            // the override pass picks it up.
+            if let Some(name) = pkg_addr_name {
+                addrs
+                    .entry(name)
+                    .or_insert_with(|| toml::Value::String("_".into()));
+            }
         }
+
+        // Strip `published-at`: it can substitute for a hard-coded
+        // `[addresses]` entry. Framework packages keep theirs.
+        if let Some(pkg) = table
+            .get_mut("package")
+            .and_then(toml::Value::as_table_mut)
+        {
+            pkg.remove("published-at");
+        }
+
+        // Strip move-package-alt's `[dep-replacements.<env>]` blocks.
+        // Each replacement carries a `published-at` for the
+        // dep-in-question per environment, which the resolver uses
+        // verbatim — bypassing our synthetic-address overrides for
+        // that dep. By dropping the block, the resolver falls back to
+        // the source the staging rewrite already redirected to.
+        table.remove("dep-replacements");
     }
 
     if let Some(deps) = table
@@ -843,7 +948,7 @@ test = "0x10"
         // and `../fixed18` land inside <root>.
         let parent_source_root = root.join("orig");
 
-        rewrite_staged_manifest(&staged_toml, &parent_source_root, &bases).unwrap();
+        rewrite_staged_manifest(&staged_toml, &parent_source_root, &bases, false).unwrap();
 
         let after = std::fs::read_to_string(&staged_toml).unwrap();
         let parsed: toml::Value = toml::from_str(&after).unwrap();
@@ -856,12 +961,12 @@ test = "0x10"
         );
 
         let addrs = table["addresses"].as_table().unwrap();
+        // For non-framework packages, every named address is forced to
+        // the `_` placeholder so the synthetic-address override drives
+        // the final value. Framework packages skip this rewrite — see
+        // the separate test below.
         assert_eq!(addrs["parent"].as_str(), Some("_"), "0x0 → _");
-        assert_eq!(
-            addrs["hardcoded"].as_str(),
-            Some("0x123"),
-            "non-0x0 left alone",
-        );
+        assert_eq!(addrs["hardcoded"].as_str(), Some("_"), "non-0x0 → _ for non-framework");
 
         let deps = table["dependencies"].as_table().unwrap();
         assert_eq!(
@@ -901,7 +1006,7 @@ Mystery.local = "../mystery"
         )
         .unwrap();
         let bases: BTreeMap<String, String> = BTreeMap::new();
-        let err = rewrite_staged_manifest(&staged_toml, &root.join("orig"), &bases).unwrap_err();
+        let err = rewrite_staged_manifest(&staged_toml, &root.join("orig"), &bases, false).unwrap_err();
         assert!(
             format!("{err}").contains("didn't stage"),
             "expected an unknown-dep error, got: {err}"

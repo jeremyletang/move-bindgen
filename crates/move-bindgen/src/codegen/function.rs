@@ -66,7 +66,7 @@ fn emit_function(
     } else {
         let parts = type_param_idents
             .iter()
-            .map(|n| quote! { <#n as MoveType>::type_tag() });
+            .map(|n| quote! { <#n as MoveType>::type_tag(b) });
         quote!(vec![ #( #parts ),* ])
     };
 
@@ -111,7 +111,7 @@ fn emit_function(
             TokenStream::new(),
             quote! {
                 b.move_call(
-                    super::PACKAGE_ID,
+                    b.package_id::<super::Package>(),
                     #module_name,
                     #fn_name,
                     #type_tags_expr,
@@ -123,7 +123,7 @@ fn emit_function(
             quote!(-> Argument),
             quote! {
                 b.move_call(
-                    super::PACKAGE_ID,
+                    b.package_id::<super::Package>(),
                     #module_name,
                     #fn_name,
                     #type_tags_expr,
@@ -139,7 +139,7 @@ fn emit_function(
                 quote!(-> ( #( #arg_repeat ),* )),
                 quote! {
                     let __r = b.move_call_n(
-                        super::PACKAGE_ID,
+                        b.package_id::<super::Package>(),
                         #module_name,
                         #fn_name,
                         #type_tags_expr,
@@ -251,7 +251,7 @@ fn datatype_bound(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStrea
     }
 
     // Same-package datatype — use the codegen'd ArgumentX trait.
-    if module_addr == ctx.package_addr {
+    if module_addr == ctx.build_addr {
         let trait_ident = format_ident!("Argument{type_name}");
         if dt.type_arguments.is_empty() {
             return if dt.module.name == *ctx.current_module {

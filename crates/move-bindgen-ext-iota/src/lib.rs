@@ -16,12 +16,160 @@ use iota_sdk_graphql_client::{
     query_types::{EventFilter, ObjectFilter},
     Client, PaginationFilter,
 };
-use iota_sdk_transaction_builder::types::MoveType;
 use iota_sdk_transaction_builder::unresolved::Argument;
 use iota_sdk_types::{
     Address, Digest, ExecutionStatus, Object, ObjectId, ObjectOut, ObjectReference, Owner,
     StructTag, Transaction, TransactionEffects, TypeTag, UserSignature, Version,
 };
+
+// -----------------------------------------------------------------------------
+// MoveType + PackageAddrs (mirror of `move-bindgen-ext-sui`).
+// -----------------------------------------------------------------------------
+
+/// Marker type used by `MoveType` impls that don't belong to a
+/// generated package (primitives, framework types, etc.).
+pub struct NoPackage;
+
+/// Runtime map from a generated `Package` marker type to its on-chain
+/// address. Both `PtbBuilder` and `PackageRegistry` implement this.
+pub trait PackageAddrs {
+    fn package_id<P: 'static>(&self) -> Address;
+}
+
+/// Free-standing package address store for non-PTB callers.
+#[derive(Default)]
+pub struct PackageRegistry {
+    map: std::collections::HashMap<std::any::TypeId, Address>,
+}
+
+impl PackageRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with<P: 'static>(mut self, addr: Address) -> Self {
+        self.map.insert(std::any::TypeId::of::<P>(), addr);
+        self
+    }
+    pub fn at<P: 'static>(addr: Address) -> Self {
+        Self::new().with::<P>(addr)
+    }
+}
+
+impl PackageAddrs for PackageRegistry {
+    fn package_id<P: 'static>(&self) -> Address {
+        *self.map.get(&std::any::TypeId::of::<P>()).unwrap_or_else(|| {
+            panic!(
+                "PackageRegistry: no address registered for {}",
+                std::any::type_name::<P>(),
+            )
+        })
+    }
+}
+
+/// Maps a Rust type to its Move `TypeTag`. Mirror of
+/// `move-bindgen-ext-sui::MoveType` — see that crate for the design
+/// notes; the trait shape is identical so codegen stays uniform.
+pub trait MoveType {
+    type Package: 'static;
+    const MODULE: &'static str;
+    const NAME: &'static str;
+    fn type_params(_addrs: &impl PackageAddrs) -> Vec<TypeTag> {
+        Vec::new()
+    }
+    fn type_tag(addrs: &impl PackageAddrs) -> TypeTag {
+        make_struct_tag_export(
+            addrs.package_id::<Self::Package>(),
+            Self::MODULE,
+            Self::NAME,
+            Self::type_params(addrs),
+        )
+    }
+    fn type_tag_at(addr: Address) -> TypeTag
+    where
+        Self: Sized,
+    {
+        let reg = PackageRegistry::at::<Self::Package>(addr);
+        Self::type_tag(&reg)
+    }
+}
+
+/// Mirror of `runtime-iota::make_struct_tag` — kept here so the trait's
+/// default `type_tag` body doesn't need a runtime re-export.
+pub fn make_struct_tag_export(
+    addr: Address,
+    module: &str,
+    name: &str,
+    params: Vec<TypeTag>,
+) -> TypeTag {
+    TypeTag::Struct(Box::new(StructTag::new(
+        addr,
+        iota_sdk_types::Identifier::new(module)
+            .expect("static module name is a valid Move identifier"),
+        iota_sdk_types::Identifier::new(name)
+            .expect("static datatype name is a valid Move identifier"),
+        params,
+    )))
+}
+
+macro_rules! impl_move_type_primitive {
+    ($($ty:ty => $tag:ident),* $(,)?) => {
+        $(
+            impl MoveType for $ty {
+                type Package = NoPackage;
+                const MODULE: &'static str = "";
+                const NAME: &'static str = "";
+                fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::$tag }
+                fn type_tag_at(_: Address) -> TypeTag { TypeTag::$tag }
+            }
+        )*
+    };
+}
+
+impl_move_type_primitive! {
+    bool => Bool,
+    u8 => U8,
+    u16 => U16,
+    u32 => U32,
+    u64 => U64,
+    u128 => U128,
+}
+
+impl MoveType for primitive_types::U256 {
+    type Package = NoPackage;
+    const MODULE: &'static str = "";
+    const NAME: &'static str = "";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::U256 }
+    fn type_tag_at(_: Address) -> TypeTag { TypeTag::U256 }
+}
+
+impl MoveType for Address {
+    type Package = NoPackage;
+    const MODULE: &'static str = "";
+    const NAME: &'static str = "";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::Address }
+    fn type_tag_at(_: Address) -> TypeTag { TypeTag::Address }
+}
+
+impl MoveType for String {
+    type Package = NoPackage;
+    const MODULE: &'static str = "";
+    const NAME: &'static str = "";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        TypeTag::Vector(Box::new(TypeTag::U8))
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
+        TypeTag::Vector(Box::new(TypeTag::U8))
+    }
+}
+
+impl<T: MoveType> MoveType for Vec<T> {
+    type Package = NoPackage;
+    const MODULE: &'static str = "";
+    const NAME: &'static str = "";
+    fn type_tag(addrs: &impl PackageAddrs) -> TypeTag {
+        TypeTag::Vector(Box::new(T::type_tag(addrs)))
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Fetcher
@@ -537,24 +685,35 @@ pub enum GetError {
 #[allow(async_fn_in_trait)] // static dispatch only — never used as `dyn`
 pub trait ClientExt {
     /// Fetch the object at `id` and BCS-decode its contents as `T`.
-    /// Verifies the on-chain type matches `T::type_tag()` before decoding.
-    async fn get_object<T>(&self, id: ObjectId) -> Result<T, GetError>
+    /// Verifies the on-chain type matches `T`'s `TypeTag` (resolved
+    /// against `addrs`) before decoding.
+    async fn get_object<T>(
+        &self,
+        id: ObjectId,
+        addrs: &impl PackageAddrs,
+    ) -> Result<T, GetError>
     where
         T: MoveType + serde::de::DeserializeOwned;
 
-    /// Batch variant of [`ClientExt::get_object`]. Walks every page returned
-    /// by the GraphQL backend, type-checks and decodes each object as `T`.
-    /// Returns the objects in the order the indexer chose, which is *not*
-    /// necessarily input order. Errors if any id is missing or has the wrong
-    /// type.
-    async fn get_objects<T>(&self, ids: &[ObjectId]) -> Result<Vec<T>, GetError>
+    /// Batch variant of [`ClientExt::get_object`].
+    async fn get_objects<T>(
+        &self,
+        ids: &[ObjectId],
+        addrs: &impl PackageAddrs,
+    ) -> Result<Vec<T>, GetError>
     where
         T: MoveType + serde::de::DeserializeOwned;
 
-    /// Read the dynamic field at `(parent, key)` and decode its value as `V`.
-    /// `K::type_tag()` is sent as the field's name type; `V::type_tag()` is
-    /// checked against the indexer's reported value type before decoding.
-    async fn get_dynamic_field<K, V>(&self, parent: ObjectId, key: K) -> Result<V, GetError>
+    /// Read the dynamic field at `(parent, key)` and decode its value
+    /// as `V`. `K`'s type tag is sent as the field's name type; `V`'s
+    /// is checked against the indexer's reported value type before
+    /// decoding. Both type tags resolve against `addrs`.
+    async fn get_dynamic_field<K, V>(
+        &self,
+        parent: ObjectId,
+        key: K,
+        addrs: &impl PackageAddrs,
+    ) -> Result<V, GetError>
     where
         K: MoveType + serde::Serialize,
         V: MoveType + serde::de::DeserializeOwned;
@@ -582,13 +741,18 @@ pub trait ClientExt {
         id: ObjectId,
         effects: &TransactionEffects,
         opts: WaitOptions,
+        addrs: &impl PackageAddrs,
     ) -> Result<T, WaitError>
     where
         T: MoveType + serde::de::DeserializeOwned;
 }
 
 impl ClientExt for Client {
-    async fn get_object<T>(&self, id: ObjectId) -> Result<T, GetError>
+    async fn get_object<T>(
+        &self,
+        id: ObjectId,
+        addrs: &impl PackageAddrs,
+    ) -> Result<T, GetError>
     where
         T: MoveType + serde::de::DeserializeOwned,
     {
@@ -597,10 +761,14 @@ impl ClientExt for Client {
             .await
             .map_err(|e| GetError::Backend(e.to_string()))?
             .ok_or(GetError::NotFound(id))?;
-        decode_object_as::<T>(id, &obj)
+        decode_object_as::<T>(id, &obj, addrs)
     }
 
-    async fn get_objects<T>(&self, ids: &[ObjectId]) -> Result<Vec<T>, GetError>
+    async fn get_objects<T>(
+        &self,
+        ids: &[ObjectId],
+        addrs: &impl PackageAddrs,
+    ) -> Result<Vec<T>, GetError>
     where
         T: MoveType + serde::de::DeserializeOwned,
     {
@@ -632,8 +800,6 @@ impl ClientExt for Client {
             cursor = page.page_info.end_cursor;
         }
 
-        // Verify every requested id came back. The indexer silently drops ids
-        // it doesn't know — turn that into a typed error.
         for id in ids {
             if !objs.iter().any(|o| o.object_id() == *id) {
                 return Err(GetError::NotFound(*id));
@@ -641,26 +807,29 @@ impl ClientExt for Client {
         }
 
         objs.iter()
-            .map(|o| decode_object_as::<T>(o.object_id(), o))
+            .map(|o| decode_object_as::<T>(o.object_id(), o, addrs))
             .collect()
     }
 
-    async fn get_dynamic_field<K, V>(&self, parent: ObjectId, key: K) -> Result<V, GetError>
+    async fn get_dynamic_field<K, V>(
+        &self,
+        parent: ObjectId,
+        key: K,
+        addrs: &impl PackageAddrs,
+    ) -> Result<V, GetError>
     where
         K: MoveType + serde::Serialize,
         V: MoveType + serde::de::DeserializeOwned,
     {
         let parent_addr: Address = *parent.as_address();
         let output = self
-            .dynamic_field(parent_addr, K::type_tag(), key)
+            .dynamic_field(parent_addr, K::type_tag(addrs), key)
             .await
             .map_err(|e| GetError::Backend(e.to_string()))?
             .ok_or(GetError::NotFound(parent))?;
         let dfv = output.value.as_ref().ok_or(GetError::NotFound(parent))?;
-        let expected = V::type_tag();
+        let expected = V::type_tag(addrs);
         if dfv.type_ != expected {
-            // We don't have a struct tag for the actual type unconditionally
-            // (it could be a primitive). Reuse `Backend` for the message.
             return Err(GetError::Backend(format!(
                 "dynamic field on {parent}: expected value type {expected}, got {actual}",
                 actual = dfv.type_,
@@ -676,8 +845,6 @@ impl ClientExt for Client {
     ) -> Result<(), WaitError> {
         require_success(effects)?;
         let deadline = Instant::now() + opts.timeout;
-        // Sequential is fine: indexer ingests one checkpoint at a time, so
-        // once the first id is visible the rest typically are too.
         for (id, version) in target_versions(effects) {
             poll_for_version(self, id, version, deadline, opts.interval).await?;
         }
@@ -689,6 +856,7 @@ impl ClientExt for Client {
         id: ObjectId,
         effects: &TransactionEffects,
         opts: WaitOptions,
+        addrs: &impl PackageAddrs,
     ) -> Result<T, WaitError>
     where
         T: MoveType + serde::de::DeserializeOwned,
@@ -701,7 +869,7 @@ impl ClientExt for Client {
             .ok_or(WaitError::NotInEffects(id))?;
         let deadline = Instant::now() + opts.timeout;
         let obj = poll_for_version(self, id, version, deadline, opts.interval).await?;
-        decode_object_as::<T>(id, &obj).map_err(WaitError::Decode)
+        decode_object_as::<T>(id, &obj, addrs).map_err(WaitError::Decode)
     }
 }
 
@@ -788,13 +956,17 @@ async fn poll_for_version(
     }
 }
 
-fn decode_object_as<T>(id: ObjectId, obj: &Object) -> Result<T, GetError>
+fn decode_object_as<T>(
+    id: ObjectId,
+    obj: &Object,
+    addrs: &impl PackageAddrs,
+) -> Result<T, GetError>
 where
     T: MoveType + serde::de::DeserializeOwned,
 {
     let move_struct = obj.as_struct_opt().ok_or(GetError::NotAStruct { id })?;
 
-    let expected = match T::type_tag() {
+    let expected = match T::type_tag(addrs) {
         TypeTag::Struct(s) => s,
         // T isn't a struct type → can't be the contents of an object.
         _ => {

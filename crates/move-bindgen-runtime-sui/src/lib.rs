@@ -36,9 +36,9 @@ pub use move_bindgen_ext_sui::{
     pure_bytes_of, u256_le, Argument, DecodeError, DryRunError, DryRunEstimateFuture, DryRunFuture,
     DryRunner, EventReader, EventReaderError, EventsByTxFuture, FetchError, FetchFuture,
     FetchedObject, Fetcher, FindByTypeFuture, FindError, GasOracle, InputKind, InspectResult,
-    ListGasCoinsFuture, MoveArg, MoveType, ObjectId, ObjectTypeFinder, OracleError, PTBArgument,
-    PureBytes, Receiving, RefGasPriceFuture, Shared, SharedMut, SubmitError, SubmitFuture,
-    Submitter, SuggestBudgetFuture, U256,
+    ListGasCoinsFuture, MoveArg, MoveType, NoPackage, ObjectId, ObjectTypeFinder, OracleError,
+    PTBArgument, PackageAddrs, PackageRegistry, PureBytes, Receiving, RefGasPriceFuture, Shared,
+    SharedMut, SubmitError, SubmitFuture, Submitter, SuggestBudgetFuture, U256,
 };
 
 // -----------------------------------------------------------------------------
@@ -79,13 +79,25 @@ pub fn make_struct_tag(addr: Address, module: &str, name: &str, params: Vec<Type
 }
 
 impl MoveType for ID {
-    fn type_tag() -> TypeTag {
+    type Package = NoPackage;
+    const MODULE: &'static str = "object";
+    const NAME: &'static str = "ID";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        make_struct_tag(SUI_FRAMEWORK_ADDRESS, "object", "ID", vec![])
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
         make_struct_tag(SUI_FRAMEWORK_ADDRESS, "object", "ID", vec![])
     }
 }
 
 impl MoveType for UID {
-    fn type_tag() -> TypeTag {
+    type Package = NoPackage;
+    const MODULE: &'static str = "object";
+    const NAME: &'static str = "UID";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        make_struct_tag(SUI_FRAMEWORK_ADDRESS, "object", "UID", vec![])
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
         make_struct_tag(SUI_FRAMEWORK_ADDRESS, "object", "UID", vec![])
     }
 }
@@ -237,6 +249,11 @@ impl InnerBuilder {
 /// [`InnerBuilder`] (which in turn wraps Sui's [`TransactionBuilder`]).
 pub struct PtbBuilder {
     pub inner: InnerBuilder,
+    /// Runtime package-address registry. Generated `move_call*` /
+    /// `MoveType::type_tag` callsites resolve their package's on-chain
+    /// address through this — callers register addresses once per
+    /// PTB with `with_package`.
+    packages: std::collections::HashMap<std::any::TypeId, Address>,
 }
 
 impl PtbBuilder {
@@ -248,8 +265,33 @@ impl PtbBuilder {
                 tx,
                 cache: ObjectCache::new(),
             },
+            packages: std::collections::HashMap::new(),
         }
     }
+
+    /// Register a Move package's on-chain address against its generated
+    /// `Package` marker. Generated `move_call*` and `MoveType::type_tag`
+    /// callsites read this map. Call once per package per PTB.
+    pub fn with_package<P: 'static>(&mut self, addr: Address) -> &mut Self {
+        self.packages.insert(std::any::TypeId::of::<P>(), addr);
+        self
+    }
+}
+
+impl PackageAddrs for PtbBuilder {
+    fn package_id<P: 'static>(&self) -> Address {
+        *self.packages.get(&std::any::TypeId::of::<P>()).unwrap_or_else(|| {
+            panic!(
+                "PtbBuilder: no address registered for package `{}` — \
+                 call `b.with_package::<{}>(addr)` before building the PTB",
+                std::any::type_name::<P>(),
+                std::any::type_name::<P>(),
+            )
+        })
+    }
+}
+
+impl PtbBuilder {
 
     /// Convenience wrapper around [`ObjectCache::register_owned`].
     pub fn register_owned(&mut self, id: ObjectId, reference: ObjectReference) -> &mut Self {
@@ -467,7 +509,10 @@ mod tests {
 
     #[test]
     fn id_move_type_targets_sui_framework() {
-        match ID::type_tag() {
+        // `ID`'s package is `NoPackage`; the addrs map is never
+        // consulted, so an empty registry is fine.
+        let reg = PackageRegistry::new();
+        match ID::type_tag(&reg) {
             TypeTag::Struct(s) => {
                 assert_eq!(*s.address(), SUI_FRAMEWORK_ADDRESS);
                 assert_eq!(s.module().as_str(), "object");

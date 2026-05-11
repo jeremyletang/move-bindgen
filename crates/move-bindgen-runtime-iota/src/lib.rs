@@ -15,11 +15,11 @@ use std::pin::Pin;
 use serde::{Deserialize, Serialize};
 
 pub use iota_sdk_transaction_builder::{
-    types::{MoveArg, MoveType},
-    // `Argument`, `Command`, `MoveCall` here are the "unresolved" variants the
-    // builder composes during PTB construction. They get resolved to the
-    // `iota_sdk_types::*` counterparts when `TransactionBuilder::finish()` is
-    // called.
+    // We deliberately *don't* re-export `iota_sdk_transaction_builder::types::MoveType`
+    // any more — `move-bindgen-ext-iota` defines its own
+    // `MoveType` trait with a runtime-package-id shape, mirroring the
+    // Sui side. Use that one.
+    types::MoveArg,
     unresolved::{Argument, Command, MoveCall},
     PTBArgument,
     PureBytes,
@@ -37,8 +37,9 @@ pub use move_bindgen_ext::{
     ClientExt, DecodeError, DryRunError, DryRunEstimateFuture, DryRunFuture, DryRunner,
     EventReader, EventReaderError, EventsByTxFuture, FetchError, FetchFuture, FetchedObject,
     Fetcher, FindByTypeFuture, FindError, GasOracle, GetError, InspectResult, ListGasCoinsFuture,
-    ObjectTypeFinder, OracleError, RefGasPriceFuture, SubmitError, SubmitFuture, Submitter,
-    SuggestBudgetFuture, WaitError, WaitOptions,
+    MoveType, NoPackage, ObjectTypeFinder, OracleError, PackageAddrs, PackageRegistry,
+    RefGasPriceFuture, SubmitError, SubmitFuture, Submitter, SuggestBudgetFuture, WaitError,
+    WaitOptions,
 };
 pub use primitive_types::U256;
 
@@ -77,13 +78,25 @@ pub fn make_struct_tag(addr: Address, module: &str, name: &str, params: Vec<Type
 }
 
 impl MoveType for ID {
-    fn type_tag() -> TypeTag {
+    type Package = NoPackage;
+    const MODULE: &'static str = "object";
+    const NAME: &'static str = "ID";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        make_struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "ID", vec![])
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
         make_struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "ID", vec![])
     }
 }
 
 impl MoveType for UID {
-    fn type_tag() -> TypeTag {
+    type Package = NoPackage;
+    const MODULE: &'static str = "object";
+    const NAME: &'static str = "UID";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        make_struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "UID", vec![])
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
         make_struct_tag(IOTA_FRAMEWORK_ADDRESS, "object", "UID", vec![])
     }
 }
@@ -150,18 +163,21 @@ pub trait EffectsExt {
     async fn created_in<T: MoveType>(
         &self,
         finder: &(impl ObjectTypeFinder + ?Sized),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<ObjectReference>, FindError>;
 
     /// Object refs of all `T`-typed objects mutated (but not created) in this tx.
     async fn mutated_in<T: MoveType>(
         &self,
         finder: &(impl ObjectTypeFinder + ?Sized),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<ObjectReference>, FindError>;
 
     /// Object refs of all `T`-typed objects either created or mutated in this tx.
     async fn changed_in<T: MoveType>(
         &self,
         finder: &(impl ObjectTypeFinder + ?Sized),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<ObjectReference>, FindError>;
 
     /// `created_in` followed by a typed batch fetch — returns fully decoded
@@ -169,6 +185,7 @@ pub trait EffectsExt {
     async fn created_decoded<T>(
         &self,
         client: &(impl ObjectTypeFinder + ClientExt),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<T>, EffectsDecodeError>
     where
         T: MoveType + serde::de::DeserializeOwned;
@@ -177,6 +194,7 @@ pub trait EffectsExt {
     async fn mutated_decoded<T>(
         &self,
         client: &(impl ObjectTypeFinder + ClientExt),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<T>, EffectsDecodeError>
     where
         T: MoveType + serde::de::DeserializeOwned;
@@ -185,6 +203,7 @@ pub trait EffectsExt {
     async fn changed_decoded<T>(
         &self,
         client: &(impl ObjectTypeFinder + ClientExt),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<T>, EffectsDecodeError>
     where
         T: MoveType + serde::de::DeserializeOwned;
@@ -193,6 +212,7 @@ pub trait EffectsExt {
     async fn events_of_type<E>(
         &self,
         reader: &(impl EventReader + ?Sized),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<E>, EventsError>
     where
         E: MoveType + serde::de::DeserializeOwned;
@@ -202,70 +222,77 @@ impl EffectsExt for TransactionEffects {
     async fn created_in<T: MoveType>(
         &self,
         finder: &(impl ObjectTypeFinder + ?Sized),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<ObjectReference>, FindError> {
         finder
-            .find_by_type(T::type_tag(), changed_ids(self, ChangeKind::Created))
+            .find_by_type(T::type_tag(addrs), changed_ids(self, ChangeKind::Created))
             .await
     }
 
     async fn mutated_in<T: MoveType>(
         &self,
         finder: &(impl ObjectTypeFinder + ?Sized),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<ObjectReference>, FindError> {
         finder
-            .find_by_type(T::type_tag(), changed_ids(self, ChangeKind::Mutated))
+            .find_by_type(T::type_tag(addrs), changed_ids(self, ChangeKind::Mutated))
             .await
     }
 
     async fn changed_in<T: MoveType>(
         &self,
         finder: &(impl ObjectTypeFinder + ?Sized),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<ObjectReference>, FindError> {
         finder
-            .find_by_type(T::type_tag(), changed_ids(self, ChangeKind::Any))
+            .find_by_type(T::type_tag(addrs), changed_ids(self, ChangeKind::Any))
             .await
     }
 
     async fn created_decoded<T>(
         &self,
         client: &(impl ObjectTypeFinder + ClientExt),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<T>, EffectsDecodeError>
     where
         T: MoveType + serde::de::DeserializeOwned,
     {
-        decoded_for(self, client, ChangeKind::Created).await
+        decoded_for(self, client, ChangeKind::Created, addrs).await
     }
 
     async fn mutated_decoded<T>(
         &self,
         client: &(impl ObjectTypeFinder + ClientExt),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<T>, EffectsDecodeError>
     where
         T: MoveType + serde::de::DeserializeOwned,
     {
-        decoded_for(self, client, ChangeKind::Mutated).await
+        decoded_for(self, client, ChangeKind::Mutated, addrs).await
     }
 
     async fn changed_decoded<T>(
         &self,
         client: &(impl ObjectTypeFinder + ClientExt),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<T>, EffectsDecodeError>
     where
         T: MoveType + serde::de::DeserializeOwned,
     {
-        decoded_for(self, client, ChangeKind::Any).await
+        decoded_for(self, client, ChangeKind::Any, addrs).await
     }
 
     async fn events_of_type<E>(
         &self,
         reader: &(impl EventReader + ?Sized),
+        addrs: &impl PackageAddrs,
     ) -> Result<Vec<E>, EventsError>
     where
         E: MoveType + serde::de::DeserializeOwned,
     {
         let digest = self.as_v1().transaction_digest;
         let payloads = reader
-            .events_by_tx(digest, E::type_tag())
+            .events_by_tx(digest, E::type_tag(addrs))
             .await
             .map_err(EventsError::Reader)?;
         payloads
@@ -297,18 +324,19 @@ async fn decoded_for<T>(
     effects: &TransactionEffects,
     client: &(impl ObjectTypeFinder + ClientExt),
     kind: ChangeKind,
+    addrs: &impl PackageAddrs,
 ) -> Result<Vec<T>, EffectsDecodeError>
 where
     T: MoveType + serde::de::DeserializeOwned,
 {
     let refs = client
-        .find_by_type(T::type_tag(), changed_ids(effects, kind))
+        .find_by_type(T::type_tag(addrs), changed_ids(effects, kind))
         .await?;
     if refs.is_empty() {
         return Ok(Vec::new());
     }
     let ids: Vec<ObjectId> = refs.iter().map(|r| r.object_id).collect();
-    Ok(client.get_objects::<T>(&ids).await?)
+    Ok(client.get_objects::<T>(&ids, addrs).await?)
 }
 
 #[derive(Copy, Clone)]
@@ -393,6 +421,11 @@ pub struct PtbBuilder {
     dry_runner: Option<Box<dyn DryRunner>>,
     cache: ObjectCache,
     auto_gas: bool,
+    /// Runtime package-address registry. Generated `move_call*` /
+    /// `MoveType::type_tag` callsites resolve their package's on-chain
+    /// address through this — callers register addresses once per
+    /// PTB with `with_package`.
+    packages: std::collections::HashMap<std::any::TypeId, Address>,
     // Each `gas*_set` flag is flipped by the corresponding setter so auto-gas
     // skips slots the user filled in explicitly.
     gas_coin_set: bool,
@@ -412,11 +445,36 @@ impl PtbBuilder {
             dry_runner: None,
             cache: ObjectCache::new(),
             auto_gas: false,
+            packages: std::collections::HashMap::new(),
             gas_coin_set: false,
             gas_price_set: false,
             gas_budget_set: false,
         }
     }
+
+    /// Register a Move package's on-chain address against its generated
+    /// `Package` marker. Generated `move_call*` and `MoveType::type_tag`
+    /// callsites read this map. Call once per package per PTB.
+    pub fn with_package<P: 'static>(&mut self, addr: Address) -> &mut Self {
+        self.packages.insert(std::any::TypeId::of::<P>(), addr);
+        self
+    }
+}
+
+impl PackageAddrs for PtbBuilder {
+    fn package_id<P: 'static>(&self) -> Address {
+        *self.packages.get(&std::any::TypeId::of::<P>()).unwrap_or_else(|| {
+            panic!(
+                "PtbBuilder: no address registered for package `{}` — \
+                 call `b.with_package::<{}>(addr)` before building the PTB",
+                std::any::type_name::<P>(),
+                std::any::type_name::<P>(),
+            )
+        })
+    }
+}
+
+impl PtbBuilder {
 
     /// Seed the builder with a previously-collected [`ObjectCache`] (e.g. one
     /// returned by an earlier [`Self::execute`]).
