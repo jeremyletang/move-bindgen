@@ -1,0 +1,15 @@
+# Single-crate bindings for the Sui-flavoured counter fixture.
+#
+# Usage (from the repo root):
+#   cargo run -p move-bindgen-cli -- install  --config configs/counter-sui.toml
+#   cargo run -p move-bindgen-cli -- generate --config configs/counter-sui.toml
+
+flavour = "sui"
+
+[output]
+format  = "single-crate"
+name    = "counter-sui-rs"
+runtime = { path = "../crates/move-bindgen-runtime-sui" }
+
+[package]
+path = "../packages/counter-sui"

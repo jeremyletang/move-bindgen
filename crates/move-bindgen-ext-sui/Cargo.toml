@@ -1,0 +1,19 @@
+[package]
+name = "move-bindgen-ext-sui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Sui backend traits + GraphQL-client integration consumed by move-bindgen-runtime-sui."
+
+[dependencies]
+serde.workspace                 = true
+bcs.workspace                   = true
+thiserror.workspace             = true
+primitive-types.workspace       = true
+sui-sdk-types.workspace         = true
+sui-transaction-builder.workspace = true
+
+[lints]
+workspace = true

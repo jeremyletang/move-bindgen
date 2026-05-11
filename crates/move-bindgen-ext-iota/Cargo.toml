@@ -1,0 +1,22 @@
+[package]
+name = "move-bindgen-ext-iota"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "IOTA backend traits + GraphQL-client integration consumed by move-bindgen-runtime-iota"
+
+[dependencies]
+iota-sdk-types.workspace               = true
+iota-sdk-transaction-builder.workspace = true
+iota-sdk-graphql-client.workspace      = true
+serde.workspace                        = true
+bcs.workspace                          = true
+thiserror.workspace                    = true
+primitive-types.workspace              = true
+tokio                                  = { version = "1", features = ["time"] }
+base64ct                               = { version = "1", features = ["alloc"] }
+
+[lints]
+workspace = true

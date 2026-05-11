@@ -1,0 +1,6 @@
+[package]
+name = "counter_iota"
+edition = "2024"
+
+[addresses]
+counter_iota = "0x0"

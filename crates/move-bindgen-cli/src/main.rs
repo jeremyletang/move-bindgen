@@ -119,12 +119,18 @@ enum Cmd {
     /// Create a starter move-bindgen.toml.
     ///
     /// Workspace-mode template, public git runtime, `framework_packages
-    /// = []` so Iota types beyond the runtime's well-known set work
-    /// out of the box. Refuses to overwrite without `--force`.
+    /// = []` so framework types beyond the runtime's well-known set
+    /// work out of the box. Refuses to overwrite without `--force`.
     Init {
         /// Target directory.
         #[arg(default_value = ".")]
         dir: PathBuf,
+        /// Move chain flavour to scaffold for.
+        ///
+        /// Recorded as `flavour = "..."` in the generated config and
+        /// drives which framework names the comment block references.
+        #[arg(long, value_enum, default_value_t = move_bindgen::Flavour::Iota)]
+        flavour: move_bindgen::Flavour,
         /// Workspace name [default: <dir basename>-rs].
         ///
         /// Skips the `-rs` suffix when the basename already ends
@@ -213,9 +219,11 @@ fn make_reporter(quiet: bool, verbose: bool) -> Reporter {
 fn make_build_opts(
     overrides: &BTreeMap<String, AccountAddress>,
     reporter: &Reporter,
+    flavour: move_bindgen::Flavour,
 ) -> BuildOptions {
     let verbose = reporter.is_verbose();
     BuildOptions {
+        flavour,
         additional_named_addresses: overrides.clone(),
         print_diags_to_stderr: verbose,
         silence_warnings: !verbose,
@@ -263,9 +271,18 @@ fn main() -> anyhow::Result<()> {
             let cfg = Config::load(&config_path)?;
             check_config(&cfg, &input_dirs)?;
         }
-        Cmd::Init { dir, name, force } => {
+        Cmd::Init {
+            dir,
+            flavour,
+            name,
+            force,
+        } => {
             let pre_existed = config_path_in(&dir).is_file();
-            let opts = move_bindgen::InitOptions { name, force };
+            let opts = move_bindgen::InitOptions {
+                flavour,
+                name,
+                force,
+            };
             let written = move_bindgen::init(&dir, &opts)?;
             // `init` always emits — quiet would defeat the only feedback.
             // Keep the message style consistent with the reporter.
@@ -321,7 +338,10 @@ fn generate_zero_config(
     reporter.stage("Compiling", package.display().to_string());
     let bindings = move_bindgen::load_package_with_options(
         package,
-        &make_build_opts(&BTreeMap::new(), reporter),
+        // Zero-config has no manifest to consult; flavour defaults to
+        // Iota. The Sui build path bails until its adapter lands, so
+        // zero-config Sui isn't reachable through this entry point.
+        &make_build_opts(&BTreeMap::new(), reporter, move_bindgen::Flavour::Iota),
     )?;
     let runtime = match runtime_path {
         Some(p) => RuntimeSpec::Path(PathBuf::from(p)),
@@ -401,8 +421,10 @@ fn generate_single_from_staging(
         .ok_or_else(|| anyhow::anyhow!("staging manifest has no packages"))?;
     let pkg_path = staging_root.join(&pkg.staged_path);
     reporter.stage("Compiling", &pkg.move_name);
-    let bindings =
-        move_bindgen::load_package_with_options(&pkg_path, &make_build_opts(overrides, reporter))?;
+    let bindings = move_bindgen::load_package_with_options(
+        &pkg_path,
+        &make_build_opts(overrides, reporter, manifest.flavour),
+    )?;
     let out_name = cfg
         .output_name
         .clone()
@@ -412,6 +434,7 @@ fn generate_single_from_staging(
         .unwrap_or_else(|| cfg.config_dir.join(&out_name));
     let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &out_dir);
     let opts = move_bindgen::GenerateOptions {
+        flavour: manifest.flavour,
         runtime,
         crate_name_override: Some(pkg.crate_name.clone()),
         ..Default::default()
@@ -447,7 +470,7 @@ fn generate_workspace_from_staging(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| cfg.config_dir.join(&workspace_name));
 
-    // Phase 1 — load every staged package, build the peer map keyed by
+    // Load every staged package and build the peer map keyed by
     // address. Framework-marked entries are skipped: the runtime owns
     // their types and ty.rs's well-known mappings handle the routing.
     let mut loaded = Vec::with_capacity(manifest.packages.len());
@@ -460,7 +483,7 @@ fn generate_workspace_from_staging(
         reporter.stage("Compiling", &pkg.move_name);
         let bindings = move_bindgen::load_package_with_options(
             &pkg_path,
-            &make_build_opts(overrides, reporter),
+            &make_build_opts(overrides, reporter, manifest.flavour),
         )?;
         let addr = bindings_address(&bindings);
         match peers.insert(addr, pkg.crate_name.clone()) {
@@ -486,8 +509,8 @@ fn generate_workspace_from_staging(
         }
     }
 
-    // Phase 2 — codegen each member crate, computing per-crate peer
-    // deps by walking type references in its IR.
+    // Codegen each member crate, computing per-crate peer deps by
+    // walking type references in its IR.
     std::fs::create_dir_all(&workspace_dir)?;
     let mut member_dirs = Vec::with_capacity(loaded.len());
     for (pkg, bindings) in &loaded {
@@ -511,6 +534,7 @@ fn generate_workspace_from_staging(
         let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &crate_dir);
         let skip_modules = framework_skip_modules(&pkg.move_name);
         let opts = move_bindgen::GenerateOptions {
+            flavour: manifest.flavour,
             runtime,
             peers: peers.clone(),
             as_workspace_member: true,
@@ -523,9 +547,9 @@ fn generate_workspace_from_staging(
         member_dirs.push(pkg.crate_name.clone());
     }
 
-    // Phase 3 — workspace-level Cargo.toml + .gitignore.
+    // Workspace-level Cargo.toml + .gitignore.
     let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &workspace_dir);
-    let workspace_cargo = render_workspace_cargo_toml(&member_dirs, &runtime);
+    let workspace_cargo = render_workspace_cargo_toml(&member_dirs, &runtime, manifest.flavour);
     std::fs::write(workspace_dir.join("Cargo.toml"), workspace_cargo)?;
     std::fs::write(workspace_dir.join(".gitignore"), "/target\n")?;
 
@@ -578,7 +602,11 @@ fn bindings_address(b: &Bindings) -> AccountAddress {
         .unwrap_or(AccountAddress::ZERO)
 }
 
-fn render_workspace_cargo_toml(members: &[String], runtime: &RuntimeSpec) -> String {
+fn render_workspace_cargo_toml(
+    members: &[String],
+    runtime: &RuntimeSpec,
+    flavour: move_bindgen::Flavour,
+) -> String {
     let mut s = String::new();
     s.push_str("# @generated by move-bindgen — regenerate with `move-bindgen generate`.\n\n");
     s.push_str("[workspace]\nresolver = \"2\"\nmembers = [\n");
@@ -588,24 +616,41 @@ fn render_workspace_cargo_toml(members: &[String], runtime: &RuntimeSpec) -> Str
     s.push_str("]\n\n");
     s.push_str("[workspace.package]\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n\n");
     s.push_str("[workspace.dependencies]\n");
-    s.push_str(&render_runtime_dep_line_text(runtime));
+    s.push_str(&render_runtime_dep_line_text(runtime, flavour));
     s.push('\n');
     s.push_str("serde = { version = \"1\", features = [\"derive\"] }\n");
     s.push_str("bcs   = \"0.1\"\n");
     s
 }
 
-fn render_runtime_dep_line_text(spec: &RuntimeSpec) -> String {
+/// Crate name the local `move-bindgen-runtime` alias resolves to,
+/// mirroring `crates/move-bindgen/src/codegen/mod.rs::runtime_package_name`.
+/// Generated workspace Cargo.tomls use this in `package = "..."` so member
+/// crates can keep using `move-bindgen-runtime.workspace = true`.
+fn runtime_package_name(flavour: move_bindgen::Flavour) -> &'static str {
+    match flavour {
+        move_bindgen::Flavour::Iota => "move-bindgen-runtime-iota",
+        move_bindgen::Flavour::Sui => "move-bindgen-runtime-sui",
+    }
+}
+
+fn render_runtime_dep_line_text(spec: &RuntimeSpec, flavour: move_bindgen::Flavour) -> String {
+    let pkg = runtime_package_name(flavour);
     match spec {
-        RuntimeSpec::Path(p) => format!("move-bindgen-runtime = {{ path = \"{}\" }}", p.display()),
-        RuntimeSpec::Version(v) => format!("move-bindgen-runtime = \"{v}\""),
+        RuntimeSpec::Path(p) => format!(
+            "move-bindgen-runtime = {{ package = \"{pkg}\", path = \"{}\" }}",
+            p.display()
+        ),
+        RuntimeSpec::Version(v) => {
+            format!("move-bindgen-runtime = {{ package = \"{pkg}\", version = \"{v}\" }}")
+        }
         RuntimeSpec::Git {
             url,
             rev,
             branch,
             tag,
         } => {
-            let mut parts = vec![format!("git = \"{url}\"")];
+            let mut parts = vec![format!("package = \"{pkg}\""), format!("git = \"{url}\"")];
             if let Some(r) = rev {
                 parts.push(format!("rev = \"{r}\""));
             }

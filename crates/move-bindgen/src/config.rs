@@ -43,6 +43,39 @@ pub enum OutputFormat {
     Workspace,
 }
 
+/// Move chain flavour — chooses which build chain, runtime crate,
+/// and SDK family the generated code targets.
+///
+/// Flavour is per-project. Two flavours don't mix in one workspace
+/// (different SDK type identities). Default is `Iota`.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    clap::ValueEnum,
+)]
+#[serde(rename_all = "lowercase")]
+#[clap(rename_all = "lowercase")]
+pub enum Flavour {
+    #[default]
+    Iota,
+    Sui,
+}
+
+impl Flavour {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Flavour::Iota => "iota",
+            Flavour::Sui => "sui",
+        }
+    }
+}
+
 /// How the generated code should reference `move-bindgen-runtime`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeSpec {
@@ -106,6 +139,9 @@ pub struct Config {
     /// Directory the config was loaded from. Used as the default output
     /// location and as the base for resolving runtime paths.
     pub config_dir: PathBuf,
+    /// Move chain flavour — which build chain, SDK family, and runtime
+    /// crate the generated code targets. Defaults to `Iota`.
+    pub flavour: Flavour,
     pub format: OutputFormat,
     /// Output directory name. For workspace mode, required in the TOML.
     /// For single-crate mode, defaults to `<input-dir basename>-rs` if not
@@ -259,6 +295,7 @@ impl Config {
 
         Ok(Config {
             config_dir,
+            flavour: raw.flavour.unwrap_or_default(),
             format,
             output_name: raw.output.name,
             runtime,
@@ -367,6 +404,8 @@ impl PackageSource {
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     output: RawOutput,
+    #[serde(default)]
+    flavour: Option<Flavour>,
     #[serde(default)]
     framework_packages: Option<Vec<String>>,
     #[serde(default)]
@@ -625,12 +664,77 @@ mod tests {
         assert_eq!(cfg.packages[0].crate_name(), "barbaz");
         assert_eq!(cfg.packages[1].id, "foo");
         assert_eq!(cfg.packages[1].crate_name(), "foo-rs");
+        assert_eq!(cfg.flavour, Flavour::Iota, "flavour defaults to Iota");
         assert_eq!(
             cfg.framework_packages,
             DEFAULT_FRAMEWORK_PACKAGES
                 .iter()
                 .map(|s| s.to_string())
                 .collect()
+        );
+    }
+
+    #[test]
+    fn flavour_field_round_trips_iota() {
+        let cfg = parse(
+            r#"
+            flavour = "iota"
+
+            [output]
+            format = "workspace"
+            name   = "ws"
+            runtime = { path = "../runtime" }
+
+            [packages.foo]
+            path = "packages/foo"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.flavour, Flavour::Iota);
+    }
+
+    #[test]
+    fn flavour_field_round_trips_sui() {
+        let cfg = parse(
+            r#"
+            flavour = "sui"
+
+            [output]
+            format = "workspace"
+            name   = "ws"
+            runtime = { path = "../runtime" }
+
+            [packages.foo]
+            path = "packages/foo"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.flavour, Flavour::Sui);
+    }
+
+    #[test]
+    fn flavour_field_rejects_unknown() {
+        let err = parse(
+            r#"
+            flavour = "ethereum"
+
+            [output]
+            format = "workspace"
+            name   = "ws"
+            runtime = { path = "../runtime" }
+
+            [packages.foo]
+            path = "packages/foo"
+            "#,
+        )
+        .unwrap_err();
+        // serde's default error for an unknown unit-variant; just
+        // confirm we surface it as a load failure rather than silently
+        // accepting unknown values.
+        assert!(
+            format!("{err:#}").contains("unknown variant")
+                || format!("{err:#}").contains("flavour"),
+            "expected an unknown-flavour error, got: {err:#}",
         );
     }
 

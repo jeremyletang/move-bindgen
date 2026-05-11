@@ -1,0 +1,11 @@
+[package]
+name = "counter_sui"
+edition = "2024.beta"
+flavor = "sui"
+
+[environments]
+testnet = "4c78adac"
+mainnet = "35834a8a"
+
+[addresses]
+counter_sui = "0x0"

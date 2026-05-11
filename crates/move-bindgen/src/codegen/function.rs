@@ -66,7 +66,7 @@ fn emit_function(
     } else {
         let parts = type_param_idents
             .iter()
-            .map(|n| quote! { <#n as MoveType>::type_tag() });
+            .map(|n| quote! { <#n as MoveType>::type_tag(b) });
         quote!(vec![ #( #parts ),* ])
     };
 
@@ -96,8 +96,8 @@ fn emit_function(
 
     // Return shape:
     //   0 returns → fn returns `()`
-    //   1 return  → fn returns `Argument` (the whole `Result(idx)`)
-    //   N returns → fn returns `(Argument; N)` (each a `NestedResult(idx, k)`)
+    //   1 return  → fn returns `Argument`
+    //   N returns → fn returns `(Argument; N)` (each a sub-handle into the result)
     let n_returns = f.return_.len();
     let return_types: Vec<String> = f.return_.iter().map(|t| t.to_string()).collect();
     let return_doc = match n_returns {
@@ -111,7 +111,7 @@ fn emit_function(
             TokenStream::new(),
             quote! {
                 b.move_call(
-                    super::PACKAGE_ID,
+                    b.package_id::<super::Package>(),
                     #module_name,
                     #fn_name,
                     #type_tags_expr,
@@ -123,7 +123,7 @@ fn emit_function(
             quote!(-> Argument),
             quote! {
                 b.move_call(
-                    super::PACKAGE_ID,
+                    b.package_id::<super::Package>(),
                     #module_name,
                     #fn_name,
                     #type_tags_expr,
@@ -133,23 +133,20 @@ fn emit_function(
         ),
         n => {
             let arg_repeat = (0..n).map(|_| quote!(Argument));
-            let nested = (0..n).map(|i| {
-                let i = i as u16;
-                quote!(Argument::NestedResult(idx, #i))
-            });
+            let count = n as u16;
+            let indices = (0..n).map(syn::Index::from);
             (
                 quote!(-> ( #( #arg_repeat ),* )),
                 quote! {
-                    match b.move_call(
-                        super::PACKAGE_ID,
+                    let __r = b.move_call_n(
+                        b.package_id::<super::Package>(),
                         #module_name,
                         #fn_name,
                         #type_tags_expr,
                         vec![ #( #arg_idents ),* ],
-                    ) {
-                        Argument::Result(idx) => ( #( #nested ),* ),
-                        _ => unreachable!("move_call always returns Argument::Result"),
-                    }
+                        #count,
+                    );
+                    ( #( __r[#indices] ),* )
                 },
             )
         }
@@ -254,7 +251,7 @@ fn datatype_bound(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStrea
     }
 
     // Same-package datatype — use the codegen'd ArgumentX trait.
-    if module_addr == ctx.package_addr {
+    if module_addr == ctx.build_addr {
         let trait_ident = format_ident!("Argument{type_name}");
         if dt.type_arguments.is_empty() {
             return if dt.module.name == *ctx.current_module {

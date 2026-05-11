@@ -72,9 +72,9 @@ jobs:
           CARGO_PROFILE_DEV_CODEGEN_UNITS: "16"
 
       - name: Smoke-test — dump example package IR
-        run: ./target/debug/move-bindgen dump packages/counter
+        run: ./target/debug/move-bindgen dump packages/counter-iota
 
-      - name: Smoke-test — generate bindings crate and check it
+      - name: Smoke-test — IOTA counter (generate + type-check + offline PTB test)
         # `cargo check` is enough: we just need to confirm the generated
         # source type-checks against the current runtime. No `--locked`
         # because the crate is regenerated each run with no committed
@@ -82,16 +82,39 @@ jobs:
         #
         # `--runtime-path` overrides the CLI's default (a git dep on
         # the public move-bindgen repo). Without this override, the
-        # generated `counter-rs/Cargo.toml` would pull `move-bindgen-runtime`
-        # from git master while `tests/counter-smoke/Cargo.toml` uses a
-        # path-dep on the in-repo runtime — same crate name, two
+        # generated `counter-iota-rs/Cargo.toml` would pull
+        # `move-bindgen-runtime` from git master while the smoke crate
+        # uses a path-dep on the in-repo runtime — same crate name, two
         # different builds in one Cargo graph → type mismatches.
         run: |
-          ./target/debug/move-bindgen generate packages/counter \
-              --runtime-path ../../crates/move-bindgen-runtime \
-              -o generated/counter-rs
-          (cd generated/counter-rs && cargo check)
-          (cd tests/counter-smoke && cargo test)
+          ./target/debug/move-bindgen generate packages/counter-iota \
+              --runtime-path ../../crates/move-bindgen-runtime-iota \
+              -o generated/counter-iota-rs
+          (cd generated/counter-iota-rs && cargo check)
+          (cd tests/counter-smoke-iota && cargo test)
+
+      - name: Smoke-test — Sui counter (generate + type-check + offline PTB test)
+        # Mirror of the IOTA smoke for the Sui flavour. The generated
+        # crate lands next to its config (`configs/counter-sui-rs`)
+        # because that's where the smoke crate's `[dependencies]`
+        # points; we don't need to redirect with `-o`.
+        run: |
+          ./target/debug/move-bindgen install  --config configs/counter-sui.toml
+          ./target/debug/move-bindgen generate --config configs/counter-sui.toml
+          (cd configs/counter-sui-rs && cargo check)
+          (cd tests/counter-smoke-sui && cargo test)
+
+      - name: Smoke-test — DeepBook v3 workspace build (full Sui multi-package)
+        # End-to-end exercise of the Sui workspace path: fetches every
+        # deepbookv3 package + its Pyth / Wormhole transitives,
+        # compiles them through sui-move-build, runs codegen for the
+        # whole workspace, and type-checks the resulting Rust crates.
+        # If anything in the framework-aware staging rewrite, the
+        # synthetic-address overrides, or the per-flavour codegen
+        # regresses, this step catches it.
+        run: |
+          ./target/debug/move-bindgen build --config configs/deepbookv3.toml
+          (cd configs/deepbookv3-rs && cargo check)
 
       - name: sccache stats (after build)
         run: sccache --show-stats

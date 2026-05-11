@@ -52,6 +52,10 @@ pub struct GeneratedCrate {
 /// Knobs for `generate`.
 #[derive(Debug, Clone)]
 pub struct GenerateOptions {
+    /// Move chain flavour the bindings target. Drives the runtime
+    /// crate name in the generated `Cargo.toml`'s `package = "..."`
+    /// alias.
+    pub flavour: crate::config::Flavour,
     /// How the generated `Cargo.toml` should reference
     /// `move-bindgen-runtime`. For path specs, the caller is responsible
     /// for handing in a path that's already relative to the output
@@ -92,8 +96,9 @@ pub struct PeerDep {
 impl Default for GenerateOptions {
     fn default() -> Self {
         Self {
+            flavour: crate::config::Flavour::default(),
             runtime: crate::config::RuntimeSpec::Path(std::path::PathBuf::from(
-                "../../crates/move-bindgen-runtime",
+                "../../crates/move-bindgen-runtime-iota",
             )),
             peers: crate::PeerMap::new(),
             as_workspace_member: false,
@@ -105,26 +110,42 @@ impl Default for GenerateOptions {
 }
 
 pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<GeneratedCrate> {
-    let package_addr = bindings
-        .published_at
-        .or_else(|| bindings.modules.first().map(|m| m.id.address))
+    // The address the modules were *compiled* against (the synthetic
+    // override from `additional_named_addresses`). We use it only for
+    // codegen-time equality checks ("is this type ref intra-package?"),
+    // never for emitting an on-chain `PACKAGE_ID` — that's now resolved
+    // at runtime via `b.package_id::<super::Package>()`.
+    let build_addr = bindings
+        .modules
+        .first()
+        .map(|m| m.id.address)
         .unwrap_or(AccountAddress::ZERO);
 
+    // Move package names commonly use snake_case (`counter_iota`);
+    // Rust crate names conventionally use kebab-case
+    // (`counter-iota-rs`). Translate `_` → `-` when deriving the
+    // default so the generated `Cargo.toml`'s `name` is a valid
+    // canonical Cargo package name. `crate_name_override` is left
+    // alone — explicit user config wins.
     let crate_name = opts
         .crate_name_override
         .clone()
-        .unwrap_or_else(|| format!("{}-rs", bindings.package_name));
+        .unwrap_or_else(|| format!("{}-rs", bindings.package_name.replace('_', "-")));
 
     // Per-module sources. Skip modules with no items to emit — they'd
     // produce empty .rs files.
     let mut module_files = Vec::new();
     let mut module_names = Vec::new();
+    // Modules whose codegen emitted a `ModuleAt` wrapper (i.e. they
+    // had at least one non-generic datatype). Used to populate
+    // `PackageAt`'s per-module methods.
+    let mut modules_with_at = Vec::new();
     for (i, m) in bindings.modules.iter().enumerate() {
         if opts.skip_modules.contains(m.id.name.as_str()) {
             continue;
         }
         let ctx = TypeCtx {
-            package_addr,
+            build_addr,
             current_module: &m.id.name,
             docs: &bindings.docs,
             peers: &opts.peers,
@@ -136,14 +157,15 @@ pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<Generated
             .unwrap_or(&[]);
         let mut body = constant::emit_constants(&m.constants, &names.to_vec(), &ctx)
             .with_context(|| format!("constant codegen for module {}", m.id.name))?;
-        body.extend(
-            datatype::emit_datatypes(m, &ctx)
-                .with_context(|| format!("datatype codegen for module {}", m.id.name))?,
-        );
+        let (dt_tokens, non_generic) = datatype::emit_datatypes(m, &ctx)
+            .with_context(|| format!("datatype codegen for module {}", m.id.name))?;
+        body.extend(dt_tokens);
         body.extend(
             function::emit_functions(m, &ctx)
                 .with_context(|| format!("function codegen for module {}", m.id.name))?,
         );
+        // Append the per-module `ModuleAt` wrapper, if any.
+        body.extend(datatype::emit_module_at(&non_generic));
         if body.is_empty() {
             continue;
         }
@@ -151,14 +173,18 @@ pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<Generated
         let module_source = render_module(body, module_doc)?;
         let mod_name = m.id.name.as_str().to_string();
         module_files.push((format!("{mod_name}.rs"), module_source));
+        if !non_generic.is_empty() {
+            modules_with_at.push(mod_name.clone());
+        }
         module_names.push(mod_name);
     }
 
-    let lib_rs = render_lib_rs(&module_names, package_addr)?;
+    let lib_rs = render_lib_rs(&module_names, &modules_with_at)?;
     let cargo_toml = render_cargo_toml(
         &crate_name,
         &bindings.package_name,
         &opts.runtime,
+        opts.flavour,
         opts.as_workspace_member,
         &opts.peer_deps,
     );
@@ -190,13 +216,19 @@ fn render_module(body: TokenStream, module_doc: Option<&str>) -> Result<String> 
     Ok(prettyplease::unparse(&file))
 }
 
-fn render_lib_rs(modules: &[String], package_addr: AccountAddress) -> Result<String> {
+fn render_lib_rs(modules: &[String], modules_with_at: &[String]) -> Result<String> {
     let mod_decls = modules.iter().map(|n| {
         let ident = format_ident!("{}", n);
         quote! { pub mod #ident; }
     });
-    let bytes = package_addr.into_bytes();
-    let byte_lits = bytes.iter().map(|b| quote!(#b));
+    let pkg_at_methods = modules_with_at.iter().map(|n| {
+        let ident = format_ident!("{}", n);
+        quote! {
+            pub fn #ident(&self) -> #ident::ModuleAt {
+                #ident::ModuleAt { package: self.addr }
+            }
+        }
+    });
 
     let lib = quote! {
         // @generated by move-bindgen — do not edit by hand.
@@ -206,8 +238,43 @@ fn render_lib_rs(modules: &[String], package_addr: AccountAddress) -> Result<Str
 
         #( #mod_decls )*
 
-        /// Address the package was generated against.
-        pub const PACKAGE_ID: Address = Address::new([ #( #byte_lits ),* ]);
+        /// Marker type identifying this package. Register the package's
+        /// on-chain address before issuing any PTB call:
+        ///
+        /// ```ignore
+        /// let mut b = PtbBuilder::new(sender);
+        /// b.with_package::<Package>(my_published_address);
+        /// // ...generated calls now resolve `my_published_address`.
+        /// ```
+        ///
+        /// Same marker is accepted by the free-standing
+        /// `PackageRegistry::at::<Package>(addr)` for non-PTB callers
+        /// (event decoders, BCS deserialization, etc.).
+        pub struct Package;
+
+        impl Package {
+            /// Bind the package to a runtime address and get a chainable
+            /// handle:
+            ///
+            /// ```ignore
+            /// let pkg = Package::at(my_addr);
+            /// let tag = pkg.counter().counter_tag();
+            /// ```
+            pub fn at(addr: Address) -> PackageAt {
+                PackageAt { addr }
+            }
+        }
+
+        /// Read-only handle bound to a runtime package address. Use
+        /// the per-module accessors to navigate to a [`TypeTag`] without
+        /// spinning up a `PtbBuilder`.
+        pub struct PackageAt {
+            addr: Address,
+        }
+
+        impl PackageAt {
+            #( #pkg_at_methods )*
+        }
     };
     let file: syn::File =
         syn::parse2(lib).context("parsing generated lib.rs TokenStream as syn::File")?;
@@ -218,6 +285,7 @@ fn render_cargo_toml(
     crate_name: &str,
     package_name: &str,
     runtime: &crate::config::RuntimeSpec,
+    flavour: crate::config::Flavour,
     as_workspace_member: bool,
     peer_deps: &[PeerDep],
 ) -> String {
@@ -240,7 +308,7 @@ fn render_cargo_toml(
         deps.push_str("serde.workspace = true\n");
         deps.push_str("bcs.workspace = true\n");
     } else {
-        deps.push_str(&render_runtime_dep_line(runtime));
+        deps.push_str(&render_runtime_dep_line(runtime, flavour));
         deps.push('\n');
         deps.push_str("serde = { version = \"1\", features = [\"derive\"] }\n");
         deps.push_str("bcs   = \"0.1\"\n");
@@ -264,18 +332,39 @@ fn render_cargo_toml(
     format!("{header}{deps}{footer}")
 }
 
-fn render_runtime_dep_line(spec: &crate::config::RuntimeSpec) -> String {
+/// Crate name the local `move-bindgen-runtime` alias resolves to,
+/// based on flavour. Generated `Cargo.toml`s use this in
+/// `package = "..."` so the `use move_bindgen_runtime::*;` import in
+/// generated source stays flavour-agnostic — only the alias target
+/// switches between flavours.
+fn runtime_package_name(flavour: crate::config::Flavour) -> &'static str {
+    match flavour {
+        crate::config::Flavour::Iota => "move-bindgen-runtime-iota",
+        crate::config::Flavour::Sui => "move-bindgen-runtime-sui",
+    }
+}
+
+fn render_runtime_dep_line(
+    spec: &crate::config::RuntimeSpec,
+    flavour: crate::config::Flavour,
+) -> String {
     use crate::config::RuntimeSpec;
+    let pkg = runtime_package_name(flavour);
     match spec {
-        RuntimeSpec::Path(p) => format!("move-bindgen-runtime = {{ path = \"{}\" }}", p.display()),
-        RuntimeSpec::Version(v) => format!("move-bindgen-runtime = \"{v}\""),
+        RuntimeSpec::Path(p) => format!(
+            "move-bindgen-runtime = {{ package = \"{pkg}\", path = \"{}\" }}",
+            p.display()
+        ),
+        RuntimeSpec::Version(v) => {
+            format!("move-bindgen-runtime = {{ package = \"{pkg}\", version = \"{v}\" }}")
+        }
         RuntimeSpec::Git {
             url,
             rev,
             branch,
             tag,
         } => {
-            let mut parts = vec![format!("git = \"{url}\"")];
+            let mut parts = vec![format!("package = \"{pkg}\""), format!("git = \"{url}\"")];
             if let Some(r) = rev {
                 parts.push(format!("rev = \"{r}\""));
             }

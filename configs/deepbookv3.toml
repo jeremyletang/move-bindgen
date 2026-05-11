@@ -1,0 +1,64 @@
+# Workspace bindings for DeepBook v3 — Sui's on-chain CLOB DEX.
+#
+# Usage (from the move-bindgen repo root):
+#   cargo run -p move-bindgen-cli -- install  --config configs/deepbookv3.toml
+#   cargo run -p move-bindgen-cli -- generate --config configs/deepbookv3.toml
+#
+# Sui packages don't list `Sui` / `MoveStdlib` in their `[dependencies]`
+# — they rely on `SuiFlavor`'s implicit-dep injection at build time.
+# Our auto-discovery only walks `[dependencies]`, so we list both
+# framework packages explicitly here. Source comes from the same
+# `mystenlabs/sui` rev pinned in the workspace `Cargo.toml`.
+
+flavour = "sui"
+
+# Override the default ["Iota", "MoveStdlib"]. We let auto-discovery
+# pull in `sui` + `move_stdlib` as peer crates instead — codegen's
+# well-known map still handles the basics (UID, ID, Option, String) via
+# the runtime.
+framework_packages = []
+
+[output]
+format  = "workspace"
+name    = "deepbookv3-rs"
+runtime = { path = "../crates/move-bindgen-runtime-sui" }
+
+[packages.dbtc]
+git    = "https://github.com/MystenLabs/deepbookv3.git"
+rev    = "main"
+subdir = "packages/dbtc"
+
+[packages.deepbook]
+git    = "https://github.com/MystenLabs/deepbookv3.git"
+rev    = "main"
+subdir = "packages/deepbook"
+
+[packages.deepbook_margin]
+git    = "https://github.com/MystenLabs/deepbookv3.git"
+rev    = "main"
+subdir = "packages/deepbook_margin"
+
+[packages.dusdc]
+git    = "https://github.com/MystenLabs/deepbookv3.git"
+rev    = "main"
+subdir = "packages/dusdc"
+
+[packages.margin_liquidation]
+git    = "https://github.com/MystenLabs/deepbookv3.git"
+rev    = "main"
+subdir = "packages/margin_liquidation"
+
+[packages.predict]
+git    = "https://github.com/MystenLabs/deepbookv3.git"
+rev    = "main"
+subdir = "packages/predict"
+
+[packages.sui]
+git    = "https://github.com/MystenLabs/sui.git"
+rev    = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8"
+subdir = "crates/sui-framework/packages/sui-framework"
+
+[packages.move_stdlib]
+git    = "https://github.com/MystenLabs/sui.git"
+rev    = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8"
+subdir = "crates/sui-framework/packages/move-stdlib"

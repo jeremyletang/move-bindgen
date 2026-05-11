@@ -3,8 +3,8 @@
 Generate Rust bindings for a Move package — types, PTB call builders, and
 dev-inspect "view" calls — from sources, the way `abigen` does for Solidity.
 
-> Status: early. The build pipeline and IR walk are in place; codegen is
-> being added next. Targets the IOTA Move flavour.
+> Status: early. The build pipeline and IR walk are in place; codegen
+> is wired for both IOTA and Sui Move flavours.
 
 ## Quickstart
 
@@ -13,22 +13,25 @@ dev-inspect "view" calls — from sources, the way `abigen` does for Solidity.
 cargo build -p move-bindgen-cli
 
 # Inspect the IR for the example package
-./target/debug/move-bindgen dump packages/counter
+./target/debug/move-bindgen dump packages/counter-iota
 ```
 
-The example under `packages/counter/` is a small multi-module package
-covering structs, enums, generics with phantom and ability bounds,
-constants, references, and the four function visibilities — used to
-exercise codegen.
+The example under `packages/counter-iota/` is a small multi-module
+package covering structs, enums, generics with phantom and ability
+bounds, constants, references, and the four function visibilities —
+used to exercise codegen. `packages/counter-sui/` is the Sui-flavoured
+sibling.
 
 ## Workspace
 
-| Crate                  | What it is                                              |
-| ---------------------- | ------------------------------------------------------- |
-| `move-bindgen`         | Library: build a package, walk the IR, codegen          |
-| `move-bindgen-cli`     | `move-bindgen` binary (`dump`, `generate`, `check`)     |
-| `move-bindgen-runtime` | Runtime support consumed by generated code             |
-| `move-bindgen-ext`     | Backend traits + GraphQL-client integration             |
+| Crate                       | What it is                                              |
+| --------------------------- | ------------------------------------------------------- |
+| `move-bindgen`              | Library: build a package, walk the IR, codegen          |
+| `move-bindgen-cli`          | `move-bindgen` binary (`dump`, `generate`, `check`)     |
+| `move-bindgen-runtime-iota` | IOTA-flavour runtime support consumed by generated code |
+| `move-bindgen-runtime-sui`  | Sui-flavour runtime support consumed by generated code  |
+| `move-bindgen-ext-iota`     | IOTA backend traits + GraphQL-client integration        |
+| `move-bindgen-ext-sui`      | Sui backend traits + GraphQL-client integration         |
 
 ## Repository layout
 

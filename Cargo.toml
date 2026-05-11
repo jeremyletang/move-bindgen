@@ -3,8 +3,10 @@ resolver = "2"
 members = [
     "crates/move-bindgen",
     "crates/move-bindgen-cli",
-    "crates/move-bindgen-ext",
-    "crates/move-bindgen-runtime",
+    "crates/move-bindgen-ext-iota",
+    "crates/move-bindgen-ext-sui",
+    "crates/move-bindgen-runtime-iota",
+    "crates/move-bindgen-runtime-sui",
 ]
 
 [workspace.package]
@@ -15,10 +17,19 @@ authors = ["jeremy <me@jeremyletang.com>"]
 repository = "https://github.com/jeremyletang/move-bindgen"
 
 [workspace.dependencies]
-# Internal crates
-move-bindgen         = { path = "crates/move-bindgen" }
-move-bindgen-runtime = { path = "crates/move-bindgen-runtime" }
-move-bindgen-ext     = { path = "crates/move-bindgen-ext" }
+# Internal crates.
+#
+# `move-bindgen-runtime` / `move-bindgen-ext` here are local *aliases*
+# (via Cargo's `package = ...`) that point at the IOTA-flavoured crates.
+# Internal Rust source can still write `use move_bindgen_runtime::*;`
+# regardless of flavour; only the alias target changes when we add Sui.
+move-bindgen              = { path = "crates/move-bindgen" }
+move-bindgen-runtime-iota = { path = "crates/move-bindgen-runtime-iota" }
+move-bindgen-ext-iota     = { path = "crates/move-bindgen-ext-iota" }
+move-bindgen-runtime-sui  = { path = "crates/move-bindgen-runtime-sui" }
+move-bindgen-ext-sui      = { path = "crates/move-bindgen-ext-sui" }
+move-bindgen-runtime      = { package = "move-bindgen-runtime-iota", path = "crates/move-bindgen-runtime-iota" }
+move-bindgen-ext          = { package = "move-bindgen-ext-iota", path = "crates/move-bindgen-ext-iota" }
 
 # Used by both the runtime and generated code
 serde           = { version = "1", features = ["derive"] }
@@ -44,6 +55,27 @@ iota-sdk-transaction-builder = { git = "https://github.com/iotaledger/iota-rust-
 iota-sdk-crypto              = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
 iota-sdk-graphql-client      = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
 
+# Sui Rust SDK — pinned to a specific revision for the Sui-flavoured
+# runtime crate (`move-bindgen-runtime-sui`). Naming differs from
+# IOTA's: `sui-sdk-types` (matches), but `sui-transaction-builder`
+# drops the `-sdk-` infix.
+sui-sdk-types          = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
+sui-transaction-builder = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
+sui-crypto             = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
+
+# Sui build chain — pinned git deps to mystenlabs/sui. Bump the rev
+# below in lockstep when updating.
+sui-move-build  = { git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+sui-package-alt = { git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+move-package-alt = { git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+move-package-alt-compilation = { git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+# Sui's external-crates/move fork. Distinct from IOTA's `move-binary-format`
+# of the same name — cargo keeps them separate because the git source URL
+# (and rev) differ.
+move-binary-format-sui       = { package = "move-binary-format", git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+move-bytecode-source-map-sui = { package = "move-bytecode-source-map", git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+move-core-types-sui          = { package = "move-core-types", git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+
 # Local-dev override: uncomment to point all iota git deps at a sibling checkout.
 # [patch."https://github.com/iotaledger/iota.git"]
 # iota-move-build         = { path = "../iota/crates/iota-move-build" }
@@ -56,6 +88,14 @@ iota-sdk-graphql-client      = { git = "https://github.com/iotaledger/iota-rust-
 # [patch."https://github.com/iotaledger/iota-rust-sdk.git"]
 # iota-sdk-types               = { path = "../iota-rust-sdk/crates/iota-sdk-types" }
 # iota-sdk-transaction-builder = { path = "../iota-rust-sdk/crates/iota-sdk-transaction-builder" }
+# [patch."https://github.com/MystenLabs/sui.git"]
+# sui-move-build       = { path = "../sui/crates/sui-move-build" }
+# sui-package-alt      = { path = "../sui/crates/sui-package-alt" }
+# move-package-alt     = { path = "../sui/external-crates/move/crates/move-package-alt" }
+# move-package-alt-compilation = { path = "../sui/external-crates/move/crates/move-package-alt-compilation" }
+# move-binary-format       = { path = "../sui/external-crates/move/crates/move-binary-format" }
+# move-bytecode-source-map = { path = "../sui/external-crates/move/crates/move-bytecode-source-map" }
+# move-core-types          = { path = "../sui/external-crates/move/crates/move-core-types" }
 
 # Codegen
 syn          = { version = "2", features = ["full"] }

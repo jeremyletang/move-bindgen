@@ -1,0 +1,13 @@
+# Single-crate bindings for the IOTA counter fixture.
+#
+# Usage (from the repo root):
+#   cargo run -p move-bindgen-cli -- install  --config configs/counter-iota.toml
+#   cargo run -p move-bindgen-cli -- generate --config configs/counter-iota.toml
+
+[output]
+format  = "single-crate"
+name    = "counter-iota-rs"
+runtime = { path = "../crates/move-bindgen-runtime-iota" }
+
+[package]
+path = "../packages/counter-iota"

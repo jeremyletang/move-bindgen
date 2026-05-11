@@ -25,15 +25,80 @@ fn field_serde_attr(ty: &Type<Identifier>) -> TokenStream {
 }
 
 /// Emit all datatypes (structs + enums) defined in `module`.
-pub fn emit_datatypes(module: &Module<Identifier>, ctx: &TypeCtx) -> Result<TokenStream> {
+///
+/// Returns the token stream plus the list of non-generic datatype
+/// names defined in the module. Callers use the latter to emit the
+/// per-module `ModuleAt` wrapper (read-only call site sugar for
+/// `pkg.module().<type>_tag()`).
+pub fn emit_datatypes(
+    module: &Module<Identifier>,
+    ctx: &TypeCtx,
+) -> Result<(TokenStream, Vec<String>)> {
     let mut out = TokenStream::new();
+    let mut non_generic: Vec<String> = Vec::new();
     for s in module.structs.values() {
         out.extend(emit_struct(s, module, ctx)?);
+        if s.type_parameters.is_empty() {
+            non_generic.push(s.name.as_str().to_string());
+        }
     }
     for e in module.enums.values() {
         out.extend(emit_enum(e, module, ctx)?);
+        if e.type_parameters.is_empty() {
+            non_generic.push(e.name.as_str().to_string());
+        }
     }
-    Ok(out)
+    Ok((out, non_generic))
+}
+
+/// Emit the per-module `ModuleAt` wrapper: a tiny struct holding the
+/// package's runtime address with one `<type>_tag()` method per
+/// non-generic datatype in the module. Generic types still go through
+/// `Type::<...>::type_tag_at(addr)` / `type_tag(&registry)`.
+///
+/// Empty `non_generic` → no `ModuleAt` is emitted; the parent
+/// `PackageAt` also skips this module so the API surface is clean.
+pub fn emit_module_at(non_generic: &[String]) -> TokenStream {
+    if non_generic.is_empty() {
+        return TokenStream::new();
+    }
+    // Methods prefer the lowercased datatype name (`Counter` →
+    // `counter_tag`). But Move idiom often pairs a PascalCase struct
+    // with an ALL_CAPS witness of the same word (`Registry` /
+    // `REGISTRY`); both lowercase to the same snake-case form. Fall
+    // back to the raw datatype name (`Registry_tag` / `REGISTRY_tag`)
+    // for any name whose lowercase form isn't unique in the module.
+    let mut lower_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for name in non_generic {
+        *lower_counts.entry(name.to_lowercase()).or_insert(0) += 1;
+    }
+    let methods = non_generic.iter().map(|name| {
+        let lower = name.to_lowercase();
+        let unique = lower_counts.get(&lower).copied().unwrap_or(0) <= 1;
+        let method = if unique {
+            format_ident!("{}_tag", lower)
+        } else {
+            format_ident!("{}_tag", name)
+        };
+        let ty = format_ident!("{}", name);
+        quote! {
+            pub fn #method(&self) -> TypeTag {
+                <#ty as MoveType>::type_tag_at(self.package)
+            }
+        }
+    });
+    quote! {
+        /// Read-only handle bound to a runtime package address. Use
+        /// via `super::Package::at(addr).<module>()` and chain
+        /// `<type>_tag()` to build a [`TypeTag`] without spinning up
+        /// a `PtbBuilder`.
+        pub struct ModuleAt {
+            pub(crate) package: Address,
+        }
+        impl ModuleAt {
+            #( #methods )*
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -227,22 +292,35 @@ fn move_type_impl(
     let module_name = module.id.name.as_str();
     let type_name_s = type_name.as_str();
 
-    let type_params = if g.names.is_empty() {
-        quote!(Vec::new())
+    let decl = &g.decl;
+    let args = &g.args;
+
+    // For non-generic types, the trait's default `type_tag` (which
+    // calls `Self::type_params(addrs)` and looks up the package address
+    // in `addrs`) is exactly what we want — no method overrides needed.
+    // Generic types need to override `type_params` to recurse into each
+    // type argument.
+    if g.names.is_empty() {
+        quote! {
+            impl MoveType for #name {
+                type Package = super::Package;
+                const MODULE: &'static str = #module_name;
+                const NAME: &'static str = #type_name_s;
+            }
+        }
     } else {
         let parts = g
             .names
             .iter()
-            .map(|n| quote! { <#n as MoveType>::type_tag() });
-        quote!(vec![ #( #parts ),* ])
-    };
-
-    let decl = &g.decl;
-    let args = &g.args;
-    quote! {
-        impl #decl MoveType for #name #args {
-            fn type_tag() -> TypeTag {
-                make_struct_tag(super::PACKAGE_ID, #module_name, #type_name_s, #type_params)
+            .map(|n| quote! { <#n as MoveType>::type_tag(addrs) });
+        quote! {
+            impl #decl MoveType for #name #args {
+                type Package = super::Package;
+                const MODULE: &'static str = #module_name;
+                const NAME: &'static str = #type_name_s;
+                fn type_params(addrs: &impl PackageAddrs) -> Vec<TypeTag> {
+                    vec![ #( #parts ),* ]
+                }
             }
         }
     }
