@@ -458,8 +458,14 @@ fn scratch_id(item: &WorkItem) -> String {
 fn is_canonical_framework(move_name: &str) -> bool {
     matches!(
         move_name,
-        "Iota" | "IotaSystem" | "MoveStdlib" | "Stardust" |
-        "Sui" | "SuiSystem" | "Bridge" | "DeepBook"
+        "Iota"
+            | "IotaSystem"
+            | "MoveStdlib"
+            | "Stardust"
+            | "Sui"
+            | "SuiSystem"
+            | "Bridge"
+            | "DeepBook"
     )
 }
 
@@ -669,10 +675,7 @@ fn rewrite_staged_manifest(
 
         // Strip `published-at`: it can substitute for a hard-coded
         // `[addresses]` entry. Framework packages keep theirs.
-        if let Some(pkg) = table
-            .get_mut("package")
-            .and_then(toml::Value::as_table_mut)
-        {
+        if let Some(pkg) = table.get_mut("package").and_then(toml::Value::as_table_mut) {
             pkg.remove("published-at");
         }
 
@@ -966,7 +969,11 @@ test = "0x10"
         // the final value. Framework packages skip this rewrite — see
         // the separate test below.
         assert_eq!(addrs["parent"].as_str(), Some("_"), "0x0 → _");
-        assert_eq!(addrs["hardcoded"].as_str(), Some("_"), "non-0x0 → _ for non-framework");
+        assert_eq!(
+            addrs["hardcoded"].as_str(),
+            Some("_"),
+            "non-0x0 → _ for non-framework"
+        );
 
         let deps = table["dependencies"].as_table().unwrap();
         assert_eq!(
@@ -1006,7 +1013,8 @@ Mystery.local = "../mystery"
         )
         .unwrap();
         let bases: BTreeMap<String, String> = BTreeMap::new();
-        let err = rewrite_staged_manifest(&staged_toml, &root.join("orig"), &bases, false).unwrap_err();
+        let err =
+            rewrite_staged_manifest(&staged_toml, &root.join("orig"), &bases, false).unwrap_err();
         assert!(
             format!("{err}").contains("didn't stage"),
             "expected an unknown-dep error, got: {err}"

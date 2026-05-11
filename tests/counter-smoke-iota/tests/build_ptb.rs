@@ -4,7 +4,7 @@
 //! objects they reference, finalizes the builder, and inspects the resulting
 //! `ProgrammableTransaction` to confirm the commands are well-formed.
 
-use counter_rs::counter;
+use counter_iota_rs::counter;
 use move_bindgen_runtime::*;
 
 fn fake_object_id(byte: u8) -> ObjectId {
@@ -24,7 +24,18 @@ fn fake_object_ref(byte: u8) -> ObjectReference {
 #[tokio::test]
 async fn increment_call_finalizes_into_a_well_formed_ptb() {
     let sender = Address::ZERO;
-    let mut ptb = PtbBuilder::new(sender);
+
+    // Register the package's on-chain address against its generated
+    // `Package` marker. Generated `move_call*` callsites resolve the
+    // address through this. Stand-in value for the smoke — real usage
+    // would use a published-at from the deployment.
+    let package_addr = Address::new({
+        let mut b = [0u8; 32];
+        b[31] = 0xAB;
+        b
+    });
+    let mut ptb =
+        PtbBuilder::new(sender).with_package::<counter_iota_rs::Package>(package_addr);
 
     // Counter is shared, AdminCap is owned. Register both before any call.
     let counter_id = fake_object_id(0xC0);
@@ -66,7 +77,7 @@ async fn increment_call_finalizes_into_a_well_formed_ptb() {
         };
         assert_eq!(
             mc.package,
-            ObjectId::from(counter_rs::PACKAGE_ID),
+            ObjectId::from(package_addr),
             "package mismatch on command #{i}",
         );
         assert_eq!(mc.module.as_str(), "counter");

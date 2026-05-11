@@ -1,12 +1,12 @@
 [package]
-name = "counter-smoke"
+name = "counter-smoke-iota"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Smoke test for the generated counter-rs bindings."
+description = "Smoke test for the generated counter-iota-rs bindings."
 
 [dependencies]
-counter-rs              = { path = "../../generated/counter-rs" }
+counter-iota-rs         = { path = "../../generated/counter-iota-rs" }
 move-bindgen-runtime    = { package = "move-bindgen-runtime-iota", path = "../../crates/move-bindgen-runtime-iota" }
 iota-sdk-types          = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false }
 iota-sdk-crypto         = { git = "https://github.com/iotaledger/iota-rust-sdk.git", rev = "dee951f490769f46c78ce84058f5d3cb8b606fd7", default-features = false, features = ["ed25519", "bech32"] }
@@ -14,5 +14,5 @@ iota-sdk-graphql-client = { git = "https://github.com/iotaledger/iota-rust-sdk.g
 tokio                   = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 
 # Detach from any parent workspace so this crate is independent of the
-# move-bindgen one (counter-rs is its own workspace too).
+# move-bindgen one (counter-iota-rs is its own workspace too).
 [workspace]

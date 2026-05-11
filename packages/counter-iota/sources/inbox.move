@@ -2,7 +2,7 @@
 /// supports: a unit variant, a positional variant, and a named-fields
 /// variant. The bindings generator emits a Rust `enum` with the same
 /// three shapes plus serde derives.
-module counter::inbox;
+module counter_iota::inbox;
 
 /// A small message envelope used to exercise enum codegen. Has
 /// `copy + drop + store` so it can be passed by value as a PTB arg or

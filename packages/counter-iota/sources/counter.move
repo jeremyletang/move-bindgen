@@ -8,7 +8,7 @@
 /// The `Counter` shared object is created up front via [`create`] (which
 /// also mints an [`AdminCap`] for privileged operations) and then mutated
 /// by the various `increment*` / `set_target` / `reset` entry points.
-module counter::counter;
+module counter_iota::counter;
 
 use iota::dynamic_field;
 use iota::event;

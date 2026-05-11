@@ -4,7 +4,7 @@
 /// the second argument to `assert!` / `abort`, and the Move 2024
 /// `#[error]`-annotated string form which carries a human-readable
 /// message. The bindings generator surfaces both.
-module counter::errors;
+module counter_iota::errors;
 
 /// Caller is not the registered owner.
 const E_NOT_OWNER: u64 = 0;

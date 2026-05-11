@@ -1,7 +1,0 @@
-[package]
-name = "counter"
-edition = "2024"
-published-at = "0xc27f4d59eb52aee53c5398037de235adecc9642407a9a7c67d99178de65ad368"
-
-[addresses]
-counter = "0xc27f4d59eb52aee53c5398037de235adecc9642407a9a7c67d99178de65ad368"

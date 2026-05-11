@@ -50,8 +50,7 @@ pub fn load_package_with_options(path: &Path, opts: &BuildOptions) -> Result<Bin
     let mut constant_names = Vec::with_capacity(pkg.modules.len());
 
     for (module, names) in pkg.modules.into_iter() {
-        let normalized =
-            normalized::Module::new(&mut pool, &module, /* include_code */ false);
+        let normalized = normalized::Module::new(&mut pool, &module, /* include_code */ false);
         modules.push(normalized);
         constant_names.push(names);
     }

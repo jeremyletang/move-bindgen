@@ -272,7 +272,10 @@ impl PtbBuilder {
     /// Register a Move package's on-chain address against its generated
     /// `Package` marker. Generated `move_call*` and `MoveType::type_tag`
     /// callsites read this map. Call once per package per PTB.
-    pub fn with_package<P: 'static>(&mut self, addr: Address) -> &mut Self {
+    ///
+    /// Value-based receiver so it chains with the other builder
+    /// methods.
+    pub fn with_package<P: 'static>(mut self, addr: Address) -> Self {
         self.packages.insert(std::any::TypeId::of::<P>(), addr);
         self
     }
@@ -280,19 +283,21 @@ impl PtbBuilder {
 
 impl PackageAddrs for PtbBuilder {
     fn package_id<P: 'static>(&self) -> Address {
-        *self.packages.get(&std::any::TypeId::of::<P>()).unwrap_or_else(|| {
-            panic!(
-                "PtbBuilder: no address registered for package `{}` — \
+        *self
+            .packages
+            .get(&std::any::TypeId::of::<P>())
+            .unwrap_or_else(|| {
+                panic!(
+                    "PtbBuilder: no address registered for package `{}` — \
                  call `b.with_package::<{}>(addr)` before building the PTB",
-                std::any::type_name::<P>(),
-                std::any::type_name::<P>(),
-            )
-        })
+                    std::any::type_name::<P>(),
+                    std::any::type_name::<P>(),
+                )
+            })
     }
 }
 
 impl PtbBuilder {
-
     /// Convenience wrapper around [`ObjectCache::register_owned`].
     pub fn register_owned(&mut self, id: ObjectId, reference: ObjectReference) -> &mut Self {
         self.inner.cache.register_owned(id, reference);

@@ -88,9 +88,8 @@ pub fn resolve_git_source(
 
 fn clone_into(url: &str, dest: &Path, verbose: bool) -> Result<()> {
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!("creating MOVE_HOME parent dir {}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating MOVE_HOME parent dir {}", parent.display()))?;
     }
     let stdio = || {
         if verbose {

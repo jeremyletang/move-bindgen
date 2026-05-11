@@ -3,7 +3,7 @@
 /// Covers: phantom type parameters, ability-bounded type parameters
 /// (`T: store`), well-known `Option<T>` and `vector<T>` from the standard
 /// library, and a multi-value tuple return.
-module counter::registry;
+module counter_iota::registry;
 
 /// Shared registry parameterised over a phantom marker type. The phantom
 /// `T` carries no runtime data — codegen has to emit a `PhantomData<T>`

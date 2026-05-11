@@ -7,11 +7,12 @@
 
 use std::str::FromStr;
 
-use counter_rs::counter;
+use counter_iota_rs::counter;
 use iota_sdk_graphql_client::Client;
 use move_bindgen_runtime::*;
 
 const COUNTER_ID: &str = "0x17b5fb620158dc2d08f9456415314b6f80b62432b28bebc7c7ac906e2509f4ea";
+const PACKAGE_ADDR: &str = "0xc27f4d59eb52aee53c5398037de235adecc9642407a9a7c67d99178de65ad368";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,10 +23,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = Client::new_testnet();
     let counter_id = ObjectId::from_str(COUNTER_ID)?;
+    let package_addr = Address::from_str(PACKAGE_ADDR)?;
 
     let mut ptb = PtbBuilder::new(sender)
         .with_client(client.clone())
-        .with_auto_gas();
+        .with_auto_gas()
+        .with_package::<counter_iota_rs::Package>(package_addr);
 
     let value_arg = counter::value(&mut ptb, counter_id).await;
     let owner_arg = counter::owner(&mut ptb, counter_id).await;

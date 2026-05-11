@@ -10,7 +10,7 @@ use move_bytecode_source_map::source_map::SourceMap;
 use move_core_types::account_address::AccountAddress;
 use move_package::BuildConfig as MoveBuildConfig;
 
-use super::{BuildOptions, BuiltPackage, ConstantNames, with_captured_stderr};
+use super::{with_captured_stderr, BuildOptions, BuiltPackage, ConstantNames};
 
 pub(super) fn build(path: &Path, opts: &BuildOptions) -> Result<BuiltPackage> {
     move_package::package_hooks::register_package_hooks(Box::new(IotaPackageHooks));
@@ -36,8 +36,7 @@ pub(super) fn build(path: &Path, opts: &BuildOptions) -> Result<BuiltPackage> {
     } else {
         with_captured_stderr(build)
     };
-    let pkg = pkg
-        .with_context(|| format!("failed to build Move package at {}", path.display()))?;
+    let pkg = pkg.with_context(|| format!("failed to build Move package at {}", path.display()))?;
 
     let name = pkg
         .package

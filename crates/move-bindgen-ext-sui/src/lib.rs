@@ -76,12 +76,15 @@ impl PackageRegistry {
 
 impl PackageAddrs for PackageRegistry {
     fn package_id<P: 'static>(&self) -> Address {
-        *self.map.get(&std::any::TypeId::of::<P>()).unwrap_or_else(|| {
-            panic!(
-                "PackageRegistry: no address registered for {}",
-                std::any::type_name::<P>(),
-            )
-        })
+        *self
+            .map
+            .get(&std::any::TypeId::of::<P>())
+            .unwrap_or_else(|| {
+                panic!(
+                    "PackageRegistry: no address registered for {}",
+                    std::any::type_name::<P>(),
+                )
+            })
     }
 }
 
@@ -180,16 +183,24 @@ impl MoveType for U256 {
     type Package = NoPackage;
     const MODULE: &'static str = "";
     const NAME: &'static str = "";
-    fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::U256 }
-    fn type_tag_at(_: Address) -> TypeTag { TypeTag::U256 }
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        TypeTag::U256
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
+        TypeTag::U256
+    }
 }
 
 impl MoveType for Address {
     type Package = NoPackage;
     const MODULE: &'static str = "";
     const NAME: &'static str = "";
-    fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::Address }
-    fn type_tag_at(_: Address) -> TypeTag { TypeTag::Address }
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        TypeTag::Address
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
+        TypeTag::Address
+    }
 }
 
 impl MoveType for String {

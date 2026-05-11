@@ -11,16 +11,16 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use move_binary_format::CompiledModule;
 use move_binary_format::file_format_common::VERSION_MAX;
+use move_binary_format::CompiledModule;
 use move_core_types::account_address::AccountAddress;
 use move_package_alt::schema::Environment;
 use move_package_alt_compilation::build_config::BuildConfig as MoveAltBuildConfig;
 use move_package_alt_compilation::compiled_package::CompiledUnitWithSource;
 use sui_move_build::BuildConfig as SuiBuildConfig;
-use sui_package_alt::{SuiFlavor, mainnet_environment, testnet_environment};
+use sui_package_alt::{mainnet_environment, testnet_environment, SuiFlavor};
 
-use super::{BuildOptions, BuiltPackage, ConstantNames, with_captured_stderr};
+use super::{with_captured_stderr, BuildOptions, BuiltPackage, ConstantNames};
 
 pub(super) fn build(path: &Path, opts: &BuildOptions) -> Result<BuiltPackage> {
     let cfg = make_config(opts);
@@ -30,8 +30,7 @@ pub(super) fn build(path: &Path, opts: &BuildOptions) -> Result<BuiltPackage> {
     } else {
         with_captured_stderr(|| cfg.build(path))
     };
-    let pkg = pkg
-        .with_context(|| format!("failed to build Move package at {}", path.display()))?;
+    let pkg = pkg.with_context(|| format!("failed to build Move package at {}", path.display()))?;
 
     let name = pkg
         .package
@@ -89,7 +88,9 @@ fn make_config(opts: &BuildOptions) -> SuiBuildConfig {
 
 /// Bridge between iota's and Sui's `move-core-types` forks. Both wrap a
 /// `[u8; 32]`; only the Rust type identity differs.
-fn iota_to_sui_address(addr: AccountAddress) -> move_core_types_sui::account_address::AccountAddress {
+fn iota_to_sui_address(
+    addr: AccountAddress,
+) -> move_core_types_sui::account_address::AccountAddress {
     move_core_types_sui::account_address::AccountAddress::new(addr.into_bytes())
 }
 

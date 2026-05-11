@@ -7,12 +7,13 @@
 
 use std::str::FromStr;
 
-use counter_rs::counter::{self, Note, NoteKey};
+use counter_iota_rs::counter::{self, Note, NoteKey};
 use iota_sdk_crypto::{ed25519::Ed25519PrivateKey, ToFromBech32};
 use iota_sdk_graphql_client::Client;
 use move_bindgen_runtime::*;
 
 const COUNTER_ID: &str = "0xf2850c3a3b6a4abccb9602ee454a578ad4f01bafeb492833621f05f72f97fd36";
+const PACKAGE_ADDR: &str = "0xc27f4d59eb52aee53c5398037de235adecc9642407a9a7c67d99178de65ad368";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,6 +23,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = Client::new_testnet();
     let counter_id = ObjectId::from_str(COUNTER_ID)?;
+    let package_addr = Address::from_str(PACKAGE_ADDR)?;
+    let addrs = PackageRegistry::at::<counter_iota_rs::Package>(package_addr);
     let slot = 7u64;
     let text = b"hello from move-bindgen".to_vec();
 
@@ -31,7 +34,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ptb = PtbBuilder::new(sender)
         .with_client(client.clone())
         .with_signer(signer)
-        .with_auto_gas();
+        .with_auto_gas()
+        .with_package::<counter_iota_rs::Package>(package_addr);
 
     counter::set_note(&mut ptb, counter_id, slot, text.clone()).await;
     let (effects, _cache) = ptb.execute().await?;
@@ -42,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     let note: Note = client
-        .get_dynamic_field::<NoteKey, Note>(counter_id, NoteKey { slot })
+        .get_dynamic_field::<NoteKey, Note>(counter_id, NoteKey { slot }, &addrs)
         .await?;
 
     println!(

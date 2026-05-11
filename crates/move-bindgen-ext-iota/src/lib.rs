@@ -57,12 +57,15 @@ impl PackageRegistry {
 
 impl PackageAddrs for PackageRegistry {
     fn package_id<P: 'static>(&self) -> Address {
-        *self.map.get(&std::any::TypeId::of::<P>()).unwrap_or_else(|| {
-            panic!(
-                "PackageRegistry: no address registered for {}",
-                std::any::type_name::<P>(),
-            )
-        })
+        *self
+            .map
+            .get(&std::any::TypeId::of::<P>())
+            .unwrap_or_else(|| {
+                panic!(
+                    "PackageRegistry: no address registered for {}",
+                    std::any::type_name::<P>(),
+                )
+            })
     }
 }
 
@@ -138,16 +141,24 @@ impl MoveType for primitive_types::U256 {
     type Package = NoPackage;
     const MODULE: &'static str = "";
     const NAME: &'static str = "";
-    fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::U256 }
-    fn type_tag_at(_: Address) -> TypeTag { TypeTag::U256 }
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        TypeTag::U256
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
+        TypeTag::U256
+    }
 }
 
 impl MoveType for Address {
     type Package = NoPackage;
     const MODULE: &'static str = "";
     const NAME: &'static str = "";
-    fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::Address }
-    fn type_tag_at(_: Address) -> TypeTag { TypeTag::Address }
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        TypeTag::Address
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
+        TypeTag::Address
+    }
 }
 
 impl MoveType for String {
@@ -687,11 +698,7 @@ pub trait ClientExt {
     /// Fetch the object at `id` and BCS-decode its contents as `T`.
     /// Verifies the on-chain type matches `T`'s `TypeTag` (resolved
     /// against `addrs`) before decoding.
-    async fn get_object<T>(
-        &self,
-        id: ObjectId,
-        addrs: &impl PackageAddrs,
-    ) -> Result<T, GetError>
+    async fn get_object<T>(&self, id: ObjectId, addrs: &impl PackageAddrs) -> Result<T, GetError>
     where
         T: MoveType + serde::de::DeserializeOwned;
 
@@ -748,11 +755,7 @@ pub trait ClientExt {
 }
 
 impl ClientExt for Client {
-    async fn get_object<T>(
-        &self,
-        id: ObjectId,
-        addrs: &impl PackageAddrs,
-    ) -> Result<T, GetError>
+    async fn get_object<T>(&self, id: ObjectId, addrs: &impl PackageAddrs) -> Result<T, GetError>
     where
         T: MoveType + serde::de::DeserializeOwned,
     {
@@ -956,11 +959,7 @@ async fn poll_for_version(
     }
 }
 
-fn decode_object_as<T>(
-    id: ObjectId,
-    obj: &Object,
-    addrs: &impl PackageAddrs,
-) -> Result<T, GetError>
+fn decode_object_as<T>(id: ObjectId, obj: &Object, addrs: &impl PackageAddrs) -> Result<T, GetError>
 where
     T: MoveType + serde::de::DeserializeOwned,
 {
