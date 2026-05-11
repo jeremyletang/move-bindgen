@@ -1,0 +1,18 @@
+[book]
+title = "The move-bindgen Book"
+authors = ["jeremy <me@jeremyletang.com>"]
+description = "Generate Rust bindings for Move packages — analogous to abigen for Solidity."
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/jeremyletang/move-bindgen"
+edit-url-template = "https://github.com/jeremyletang/move-bindgen/edit/master/book/{path}"
+additional-css = []
+mathjax-support = false
+
+[output.html.fold]
+enable = true
+level = 1
