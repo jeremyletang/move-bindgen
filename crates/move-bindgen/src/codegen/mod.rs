@@ -127,9 +127,10 @@ pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<Generated
     // default so the generated `Cargo.toml`'s `name` is a valid
     // canonical Cargo package name. `crate_name_override` is left
     // alone — explicit user config wins.
-    let crate_name = opts.crate_name_override.clone().unwrap_or_else(|| {
-        format!("{}-rs", bindings.package_name.replace('_', "-"))
-    });
+    let crate_name = opts
+        .crate_name_override
+        .clone()
+        .unwrap_or_else(|| format!("{}-rs", bindings.package_name.replace('_', "-")));
 
     // Per-module sources. Skip modules with no items to emit — they'd
     // produce empty .rs files.
