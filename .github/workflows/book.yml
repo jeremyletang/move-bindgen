@@ -1,0 +1,58 @@
+name: Book
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "book/**"
+      - ".github/workflows/book.yml"
+  # Allow manual runs from the Actions tab.
+  workflow_dispatch:
+
+# GitHub Pages permissions for the official `actions/deploy-pages`
+# workflow. `contents: read` is the default; `pages` / `id-token`
+# are what Pages needs to publish.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight deploy at a time; cancel-in-progress: false so an
+# enqueued run waits for the current one rather than dropping the
+# latest changes.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build book
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install mdBook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: "0.5.2"
+
+      - name: Build book
+        run: mdbook build book
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "book/book"
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
