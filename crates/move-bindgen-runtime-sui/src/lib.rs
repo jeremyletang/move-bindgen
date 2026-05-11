@@ -269,10 +269,45 @@ impl PtbBuilder {
         self
     }
 
+    /// Append a `MoveCall` command, returning the `Argument` handle
+    /// for its result.
+    pub fn move_call(
+        &mut self,
+        package: Address,
+        module: &str,
+        function: &str,
+        type_arguments: Vec<TypeTag>,
+        arguments: Vec<Argument>,
+    ) -> Argument {
+        let mut f = sui_transaction_builder::Function::new(
+            package,
+            Identifier::new(module).expect("static module name is a valid Move identifier"),
+            Identifier::new(function).expect("static function name is a valid Move identifier"),
+        );
+        if !type_arguments.is_empty() {
+            f = f.with_type_args(type_arguments);
+        }
+        self.inner.tx.move_call(f, arguments)
+    }
+
+    /// Append a `MoveCall` and split its multi-value result into `count`
+    /// handles. Used by generated bindings for Move functions that
+    /// return more than one value.
+    pub fn move_call_n(
+        &mut self,
+        package: Address,
+        module: &str,
+        function: &str,
+        type_arguments: Vec<TypeTag>,
+        arguments: Vec<Argument>,
+        count: u16,
+    ) -> Vec<Argument> {
+        self.move_call(package, module, function, type_arguments, arguments)
+            .to_nested(count as usize)
+    }
+
     /// Resolve an `ObjectId` to an `Argument` by consulting the cache.
-    /// Used by generated `impl ArgumentX for ObjectId` overrides for
-    /// key-datatype parameters. Cache miss panics — once a Sui
-    /// `Fetcher` impl lands, the lookup falls back to a network call.
+    /// Cache miss panics — callers must register the object first.
     pub async fn resolve_object(&mut self, id: ObjectId) -> Argument {
         match self.inner.cache.lookup(&id).cloned() {
             Some(CachedObject::Owned(or)) => self.inner.tx.object(ObjectInput::owned(

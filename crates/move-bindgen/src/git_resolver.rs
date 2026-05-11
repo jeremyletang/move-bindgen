@@ -33,27 +33,17 @@ use move_package::BuildConfig as MoveBuildConfig;
 use crate::config::PackageSource;
 
 /// Resolve a `PackageSource::Git` to a local directory containing
-/// `Move.toml`. Dispatches on `flavour`: the Iota path uses
-/// `iota_move_build`'s implicit-deps + IOTA's `move-package` fork.
-/// The Sui path is not yet implemented — `bail`s with a clear message.
+/// `Move.toml`. Cloning is flavour-agnostic — the iota `move-package`
+/// fetcher just shells `git clone` into `~/.move/<sanitized>/` and we
+/// reuse it for both Iota and Sui packages. The downstream build step
+/// is what cares about flavour; this step only produces an on-disk
+/// copy of the source at the requested rev/subdir.
 ///
 /// `scratch_root` is a writeable dir where the synthetic probe
 /// manifest lives (used to drive the fetcher). When `verbose`,
 /// move-package's progress output is forwarded to stderr; otherwise
 /// it's piped to `io::sink()`.
 pub fn resolve_git_source(
-    source: &PackageSource,
-    scratch_root: &Path,
-    verbose: bool,
-    flavour: crate::config::Flavour,
-) -> Result<PathBuf> {
-    match flavour {
-        crate::config::Flavour::Iota => resolve_git_source_iota(source, scratch_root, verbose),
-        crate::config::Flavour::Sui => bail!("Sui flavour is not yet implemented"),
-    }
-}
-
-fn resolve_git_source_iota(
     source: &PackageSource,
     scratch_root: &Path,
     verbose: bool,
@@ -204,25 +194,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolve_git_source_bails_on_unimplemented_sui() {
-        let source = PackageSource::Git {
-            url: "https://example.com/x.git".into(),
-            rev: Some("main".into()),
-            branch: None,
-            tag: None,
-            subdir: None,
-        };
-        let scratch = std::env::temp_dir().join(format!(
-            "move-bindgen-git-resolver-sui-{}",
-            std::process::id()
-        ));
-        let err =
-            resolve_git_source(&source, &scratch, false, crate::config::Flavour::Sui).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains("Sui flavour is not yet implemented"),
-            "expected the not-yet-implemented bail, got: {msg}",
-        );
-    }
 }

@@ -63,6 +63,19 @@ sui-sdk-types          = { git = "https://github.com/mystenlabs/sui-rust-sdk.git
 sui-transaction-builder = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
 sui-crypto             = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
 
+# Sui build chain — pinned git deps to mystenlabs/sui. Bump the rev
+# below in lockstep when updating.
+sui-move-build  = { git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+sui-package-alt = { git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+move-package-alt = { git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+move-package-alt-compilation = { git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+# Sui's external-crates/move fork. Distinct from IOTA's `move-binary-format`
+# of the same name — cargo keeps them separate because the git source URL
+# (and rev) differ.
+move-binary-format-sui       = { package = "move-binary-format", git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+move-bytecode-source-map-sui = { package = "move-bytecode-source-map", git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+move-core-types-sui          = { package = "move-core-types", git = "https://github.com/MystenLabs/sui.git", rev = "c188832a5c2f8a48b9998e8c3888874a56bb1ca8" }
+
 # Local-dev override: uncomment to point all iota git deps at a sibling checkout.
 # [patch."https://github.com/iotaledger/iota.git"]
 # iota-move-build         = { path = "../iota/crates/iota-move-build" }
@@ -75,6 +88,14 @@ sui-crypto             = { git = "https://github.com/mystenlabs/sui-rust-sdk.git
 # [patch."https://github.com/iotaledger/iota-rust-sdk.git"]
 # iota-sdk-types               = { path = "../iota-rust-sdk/crates/iota-sdk-types" }
 # iota-sdk-transaction-builder = { path = "../iota-rust-sdk/crates/iota-sdk-transaction-builder" }
+# [patch."https://github.com/MystenLabs/sui.git"]
+# sui-move-build       = { path = "../sui/crates/sui-move-build" }
+# sui-package-alt      = { path = "../sui/crates/sui-package-alt" }
+# move-package-alt     = { path = "../sui/external-crates/move/crates/move-package-alt" }
+# move-package-alt-compilation = { path = "../sui/external-crates/move/crates/move-package-alt-compilation" }
+# move-binary-format       = { path = "../sui/external-crates/move/crates/move-binary-format" }
+# move-bytecode-source-map = { path = "../sui/external-crates/move/crates/move-bytecode-source-map" }
+# move-core-types          = { path = "../sui/external-crates/move/crates/move-core-types" }
 
 # Codegen
 syn          = { version = "2", features = ["full"] }

@@ -5,6 +5,8 @@ Cargo.lock.bak
 
 # Move
 build/
+# …but keep our own Rust source module of the same name.
+!crates/move-bindgen/src/build/
 Move.lock
 .trace
 .coverage_map.mvcov

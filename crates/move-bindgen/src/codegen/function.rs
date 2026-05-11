@@ -96,8 +96,8 @@ fn emit_function(
 
     // Return shape:
     //   0 returns → fn returns `()`
-    //   1 return  → fn returns `Argument` (the whole `Result(idx)`)
-    //   N returns → fn returns `(Argument; N)` (each a `NestedResult(idx, k)`)
+    //   1 return  → fn returns `Argument`
+    //   N returns → fn returns `(Argument; N)` (each a sub-handle into the result)
     let n_returns = f.return_.len();
     let return_types: Vec<String> = f.return_.iter().map(|t| t.to_string()).collect();
     let return_doc = match n_returns {
@@ -133,23 +133,20 @@ fn emit_function(
         ),
         n => {
             let arg_repeat = (0..n).map(|_| quote!(Argument));
-            let nested = (0..n).map(|i| {
-                let i = i as u16;
-                quote!(Argument::NestedResult(idx, #i))
-            });
+            let count = n as u16;
+            let indices = (0..n).map(syn::Index::from);
             (
                 quote!(-> ( #( #arg_repeat ),* )),
                 quote! {
-                    match b.move_call(
+                    let __r = b.move_call_n(
                         super::PACKAGE_ID,
                         #module_name,
                         #fn_name,
                         #type_tags_expr,
                         vec![ #( #arg_idents ),* ],
-                    ) {
-                        Argument::Result(idx) => ( #( #nested ),* ),
-                        _ => unreachable!("move_call always returns Argument::Result"),
-                    }
+                        #count,
+                    );
+                    ( #( __r[#indices] ),* )
                 },
             )
         }

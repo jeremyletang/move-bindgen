@@ -591,6 +591,24 @@ impl PtbBuilder {
         self.inner.command(cmd)
     }
 
+    /// Append a `MoveCall` and split its multi-value result into `count`
+    /// `Argument::NestedResult(idx, i)` handles. Used by generated
+    /// bindings for Move functions that return more than one value.
+    pub fn move_call_n(
+        &mut self,
+        package: Address,
+        module: &str,
+        function: &str,
+        type_arguments: Vec<TypeTag>,
+        arguments: Vec<Argument>,
+        count: u16,
+    ) -> Vec<Argument> {
+        match self.move_call(package, module, function, type_arguments, arguments) {
+            Argument::Result(idx) => (0..count).map(|i| Argument::NestedResult(idx, i)).collect(),
+            _ => unreachable!("move_call always returns Argument::Result"),
+        }
+    }
+
     /// Add a BCS-encoded value as a `Pure` input.
     pub fn pure<T: serde::Serialize>(&mut self, value: T) -> Argument {
         self.inner.pure(value)
