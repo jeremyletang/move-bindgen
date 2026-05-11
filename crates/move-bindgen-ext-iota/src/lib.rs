@@ -1,15 +1,18 @@
 //! Backend interfaces consumed by [`move_bindgen_runtime::PtbBuilder`], plus a
 //! ready-made integration on top of `iota_sdk_graphql_client::Client`.
 //!
-//! Provides:
-//! - The backend traits ([`Fetcher`], [`Submitter`], [`GasOracle`],
-//!   [`DryRunner`], [`ObjectTypeFinder`]) that `PtbBuilder` calls into.
+//! The chain-generic trait surface — [`Fetcher`], [`Submitter`],
+//! [`GasOracle`], [`ObjectTypeFinder`], [`EventReader`], [`DryRunner`],
+//! [`MoveType`], [`PackageAddrs`], [`PackageRegistry`] — is emitted
+//! into this crate by `move_bindgen_ext_core::define_backend_traits!`.
+//! What lives here on top:
+//!
 //! - Impls of those traits for `iota_sdk_graphql_client::Client` so
 //!   `PtbBuilder::with_client(graphql_client)` "just works".
 //! - [`ClientExt`] — typed read helpers on `Client` (e.g. [`ClientExt::get_object`]).
+//! - Wait support ([`WaitOptions`] re-exported from core, plus the
+//!   iota-typed [`WaitError`] / [`GetError`] enums).
 
-use std::future::Future;
-use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use iota_sdk_graphql_client::{
@@ -18,413 +21,26 @@ use iota_sdk_graphql_client::{
 };
 use iota_sdk_transaction_builder::unresolved::Argument;
 use iota_sdk_types::{
-    Address, Digest, ExecutionStatus, Object, ObjectId, ObjectOut, ObjectReference, Owner,
-    StructTag, Transaction, TransactionEffects, TypeTag, UserSignature, Version,
+    Address, Digest, ExecutionStatus, Object, ObjectId, ObjectOut, Owner, StructTag, Transaction,
+    TransactionEffects, TypeTag, UserSignature, Version,
 };
 
-// -----------------------------------------------------------------------------
-// MoveType + PackageAddrs (mirror of `move-bindgen-ext-sui`).
-// -----------------------------------------------------------------------------
+pub use move_bindgen_ext_core::{
+    u256_le, DryRunError, EventReaderError, FindError, NoPackage, SubmitError, WaitOptions,
+};
 
-/// Marker type used by `MoveType` impls that don't belong to a
-/// generated package (primitives, framework types, etc.).
-pub struct NoPackage;
-
-/// Runtime map from a generated `Package` marker type to its on-chain
-/// address. Both `PtbBuilder` and `PackageRegistry` implement this.
-pub trait PackageAddrs {
-    fn package_id<P: 'static>(&self) -> Address;
-}
-
-/// Free-standing package address store for non-PTB callers.
-#[derive(Default)]
-pub struct PackageRegistry {
-    map: std::collections::HashMap<std::any::TypeId, Address>,
-}
-
-impl PackageRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn with<P: 'static>(mut self, addr: Address) -> Self {
-        self.map.insert(std::any::TypeId::of::<P>(), addr);
-        self
-    }
-    pub fn at<P: 'static>(addr: Address) -> Self {
-        Self::new().with::<P>(addr)
-    }
-}
-
-impl PackageAddrs for PackageRegistry {
-    fn package_id<P: 'static>(&self) -> Address {
-        *self
-            .map
-            .get(&std::any::TypeId::of::<P>())
-            .unwrap_or_else(|| {
-                panic!(
-                    "PackageRegistry: no address registered for {}",
-                    std::any::type_name::<P>(),
-                )
-            })
-    }
-}
-
-/// Maps a Rust type to its Move `TypeTag`. Mirror of
-/// `move-bindgen-ext-sui::MoveType` — see that crate for the design
-/// notes; the trait shape is identical so codegen stays uniform.
-pub trait MoveType {
-    type Package: 'static;
-    const MODULE: &'static str;
-    const NAME: &'static str;
-    fn type_params(_addrs: &impl PackageAddrs) -> Vec<TypeTag> {
-        Vec::new()
-    }
-    fn type_tag(addrs: &impl PackageAddrs) -> TypeTag {
-        make_struct_tag_export(
-            addrs.package_id::<Self::Package>(),
-            Self::MODULE,
-            Self::NAME,
-            Self::type_params(addrs),
-        )
-    }
-    fn type_tag_at(addr: Address) -> TypeTag
-    where
-        Self: Sized,
-    {
-        let reg = PackageRegistry::at::<Self::Package>(addr);
-        Self::type_tag(&reg)
-    }
-}
-
-/// Mirror of `runtime-iota::make_struct_tag` — kept here so the trait's
-/// default `type_tag` body doesn't need a runtime re-export.
-pub fn make_struct_tag_export(
-    addr: Address,
-    module: &str,
-    name: &str,
-    params: Vec<TypeTag>,
-) -> TypeTag {
-    TypeTag::Struct(Box::new(StructTag::new(
-        addr,
-        iota_sdk_types::Identifier::new(module)
-            .expect("static module name is a valid Move identifier"),
-        iota_sdk_types::Identifier::new(name)
-            .expect("static datatype name is a valid Move identifier"),
-        params,
-    )))
-}
-
-macro_rules! impl_move_type_primitive {
-    ($($ty:ty => $tag:ident),* $(,)?) => {
-        $(
-            impl MoveType for $ty {
-                type Package = NoPackage;
-                const MODULE: &'static str = "";
-                const NAME: &'static str = "";
-                fn type_tag(_: &impl PackageAddrs) -> TypeTag { TypeTag::$tag }
-                fn type_tag_at(_: Address) -> TypeTag { TypeTag::$tag }
-            }
-        )*
-    };
-}
-
-impl_move_type_primitive! {
-    bool => Bool,
-    u8 => U8,
-    u16 => U16,
-    u32 => U32,
-    u64 => U64,
-    u128 => U128,
-}
-
-impl MoveType for primitive_types::U256 {
-    type Package = NoPackage;
-    const MODULE: &'static str = "";
-    const NAME: &'static str = "";
-    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
-        TypeTag::U256
-    }
-    fn type_tag_at(_: Address) -> TypeTag {
-        TypeTag::U256
-    }
-}
-
-impl MoveType for Address {
-    type Package = NoPackage;
-    const MODULE: &'static str = "";
-    const NAME: &'static str = "";
-    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
-        TypeTag::Address
-    }
-    fn type_tag_at(_: Address) -> TypeTag {
-        TypeTag::Address
-    }
-}
-
-impl MoveType for String {
-    type Package = NoPackage;
-    const MODULE: &'static str = "";
-    const NAME: &'static str = "";
-    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
-        TypeTag::Vector(Box::new(TypeTag::U8))
-    }
-    fn type_tag_at(_: Address) -> TypeTag {
-        TypeTag::Vector(Box::new(TypeTag::U8))
-    }
-}
-
-impl<T: MoveType> MoveType for Vec<T> {
-    type Package = NoPackage;
-    const MODULE: &'static str = "";
-    const NAME: &'static str = "";
-    fn type_tag(addrs: &impl PackageAddrs) -> TypeTag {
-        TypeTag::Vector(Box::new(T::type_tag(addrs)))
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Fetcher
-// -----------------------------------------------------------------------------
-
-/// Result of a successful object lookup by a [`Fetcher`].
-#[derive(Clone, Debug)]
-pub enum FetchedObject {
-    Owned(ObjectReference),
-    Shared {
-        initial_shared_version: u64,
-        mutable: bool,
-    },
-}
-
-/// Errors a [`Fetcher`] can return.
-#[derive(Debug, thiserror::Error)]
-pub enum FetchError {
-    #[error("object {0} not found")]
-    NotFound(ObjectId),
-    #[error("fetcher backend: {0}")]
-    Backend(String),
-}
-
-/// Manual desugaring of `async fn fetch(...)` so [`Fetcher`] stays
-/// object-safe. Implementers return `Box::pin(async move { … })`.
-pub type FetchFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<FetchedObject, FetchError>> + Send + 'a>>;
-
-/// Resolves an unknown [`ObjectId`] to a [`FetchedObject`]. Consulted by
-/// `PtbBuilder` on cache miss.
-pub trait Fetcher: Send + Sync {
-    fn fetch<'a>(&'a self, id: ObjectId) -> FetchFuture<'a>;
-}
-
-impl<F: Fetcher + ?Sized> Fetcher for std::sync::Arc<F> {
-    fn fetch<'a>(&'a self, id: ObjectId) -> FetchFuture<'a> {
-        F::fetch(self, id)
-    }
-}
-impl<F: Fetcher + ?Sized> Fetcher for Box<F> {
-    fn fetch<'a>(&'a self, id: ObjectId) -> FetchFuture<'a> {
-        F::fetch(self, id)
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Submitter
-// -----------------------------------------------------------------------------
-
-#[derive(Debug, thiserror::Error)]
-pub enum SubmitError {
-    #[error("submit backend: {0}")]
-    Backend(String),
-}
-
-pub type SubmitFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<TransactionEffects, SubmitError>> + Send + 'a>>;
-
-/// Submits a signed transaction. Used by `PtbBuilder::execute`.
-pub trait Submitter: Send + Sync {
-    fn submit<'a>(
-        &'a self,
-        tx: &'a Transaction,
-        signatures: &'a [UserSignature],
-    ) -> SubmitFuture<'a>;
-}
-
-impl<S: Submitter + ?Sized> Submitter for std::sync::Arc<S> {
-    fn submit<'a>(
-        &'a self,
-        tx: &'a Transaction,
-        signatures: &'a [UserSignature],
-    ) -> SubmitFuture<'a> {
-        S::submit(self, tx, signatures)
-    }
-}
-
-impl<S: Submitter + ?Sized> Submitter for Box<S> {
-    fn submit<'a>(
-        &'a self,
-        tx: &'a Transaction,
-        signatures: &'a [UserSignature],
-    ) -> SubmitFuture<'a> {
-        S::submit(self, tx, signatures)
-    }
-}
-
-// -----------------------------------------------------------------------------
-// GasOracle
-// -----------------------------------------------------------------------------
-
-#[derive(Debug, thiserror::Error)]
-pub enum OracleError {
-    #[error("oracle backend: {0}")]
-    Backend(String),
-    #[error("no gas coins available for {0}")]
-    NoGasCoins(Address),
-    #[error("oracle does not support `{0}`")]
-    Unsupported(&'static str),
-}
-
-pub type ListGasCoinsFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Vec<ObjectReference>, OracleError>> + Send + 'a>>;
-pub type RefGasPriceFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<u64, OracleError>> + Send + 'a>>;
-pub type SuggestBudgetFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<u64, OracleError>> + Send + 'a>>;
-pub type DryRunEstimateFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<u64, OracleError>> + Send + 'a>>;
-
-/// Backend capability `PtbBuilder` uses to fill gas slots automatically when
-/// `with_auto_gas` is enabled.
-pub trait GasOracle: Send + Sync {
-    /// Owned gas coin object refs available to `owner`.
-    fn list_gas_coins<'a>(&'a self, owner: Address) -> ListGasCoinsFuture<'a>;
-    /// Network's current reference gas price.
-    fn reference_gas_price<'a>(&'a self) -> RefGasPriceFuture<'a>;
-    /// Conservative fallback budget when dry-run isn't viable. Implementations
-    /// usually return a generous constant.
-    fn suggest_gas_budget<'a>(&'a self) -> SuggestBudgetFuture<'a>;
-    /// Dry-run `tx` and return the gas it actually used. `PtbBuilder` adds a
-    /// safety margin and uses this when `with_auto_gas` is on. The default
-    /// returns `Err(OracleError::Unsupported)` so backends can opt in.
-    fn dry_run_estimate<'a>(&'a self, _tx: &'a Transaction) -> DryRunEstimateFuture<'a> {
-        Box::pin(async { Err(OracleError::Unsupported("dry_run_estimate")) })
-    }
-}
-
-impl<O: GasOracle + ?Sized> GasOracle for std::sync::Arc<O> {
-    fn list_gas_coins<'a>(&'a self, owner: Address) -> ListGasCoinsFuture<'a> {
-        O::list_gas_coins(self, owner)
-    }
-    fn reference_gas_price<'a>(&'a self) -> RefGasPriceFuture<'a> {
-        O::reference_gas_price(self)
-    }
-    fn suggest_gas_budget<'a>(&'a self) -> SuggestBudgetFuture<'a> {
-        O::suggest_gas_budget(self)
-    }
-    fn dry_run_estimate<'a>(&'a self, tx: &'a Transaction) -> DryRunEstimateFuture<'a> {
-        O::dry_run_estimate(self, tx)
-    }
-}
-
-impl<O: GasOracle + ?Sized> GasOracle for Box<O> {
-    fn list_gas_coins<'a>(&'a self, owner: Address) -> ListGasCoinsFuture<'a> {
-        O::list_gas_coins(self, owner)
-    }
-    fn reference_gas_price<'a>(&'a self) -> RefGasPriceFuture<'a> {
-        O::reference_gas_price(self)
-    }
-    fn suggest_gas_budget<'a>(&'a self) -> SuggestBudgetFuture<'a> {
-        O::suggest_gas_budget(self)
-    }
-    fn dry_run_estimate<'a>(&'a self, tx: &'a Transaction) -> DryRunEstimateFuture<'a> {
-        O::dry_run_estimate(self, tx)
-    }
-}
-
-// -----------------------------------------------------------------------------
-// ObjectTypeFinder
-// -----------------------------------------------------------------------------
-
-#[derive(Debug, thiserror::Error)]
-pub enum FindError {
-    #[error("type-finder backend: {0}")]
-    Backend(String),
-}
-
-pub type FindByTypeFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Vec<ObjectReference>, FindError>> + Send + 'a>>;
-
-/// Backend capability for batched type-filtered object lookup. Used by
-/// `EffectsExt` to resolve "all created/mutated/changed objects of type T"
-/// after a transaction. Separate from [`Fetcher`] because the query shape is
-/// different (batch + type filter, rather than single id + ownership).
-pub trait ObjectTypeFinder: Send + Sync {
-    fn find_by_type<'a>(&'a self, type_tag: TypeTag, ids: Vec<ObjectId>) -> FindByTypeFuture<'a>;
-}
-
-impl<O: ObjectTypeFinder + ?Sized> ObjectTypeFinder for std::sync::Arc<O> {
-    fn find_by_type<'a>(&'a self, type_tag: TypeTag, ids: Vec<ObjectId>) -> FindByTypeFuture<'a> {
-        O::find_by_type(self, type_tag, ids)
-    }
-}
-impl<O: ObjectTypeFinder + ?Sized> ObjectTypeFinder for Box<O> {
-    fn find_by_type<'a>(&'a self, type_tag: TypeTag, ids: Vec<ObjectId>) -> FindByTypeFuture<'a> {
-        O::find_by_type(self, type_tag, ids)
-    }
-}
-
-// -----------------------------------------------------------------------------
-// EventReader
-// -----------------------------------------------------------------------------
-
-#[derive(Debug, thiserror::Error)]
-pub enum EventReaderError {
-    #[error("event-reader backend: {0}")]
-    Backend(String),
-}
-
-pub type EventsByTxFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Vec<Vec<u8>>, EventReaderError>> + Send + 'a>>;
-
-/// Backend capability for reading events emitted by a specific transaction
-/// filtered by Move type. Returns the BCS payload of each matching event;
-/// callers BCS-decode into the typed Rust struct. Used by `EffectsExt` to
-/// surface typed events after a transaction.
-pub trait EventReader: Send + Sync {
-    fn events_by_tx<'a>(&'a self, digest: Digest, type_tag: TypeTag) -> EventsByTxFuture<'a>;
-}
-
-impl<R: EventReader + ?Sized> EventReader for std::sync::Arc<R> {
-    fn events_by_tx<'a>(&'a self, digest: Digest, type_tag: TypeTag) -> EventsByTxFuture<'a> {
-        R::events_by_tx(self, digest, type_tag)
-    }
-}
-impl<R: EventReader + ?Sized> EventReader for Box<R> {
-    fn events_by_tx<'a>(&'a self, digest: Digest, type_tag: TypeTag) -> EventsByTxFuture<'a> {
-        R::events_by_tx(self, digest, type_tag)
-    }
-}
-
-// -----------------------------------------------------------------------------
-// DryRunner — read-path execution backing `PtbBuilder::inspect()`
-// -----------------------------------------------------------------------------
-
-/// Per-command per-slot BCS return-value bytes plus the dry-run effects.
-/// Returned by `PtbBuilder::inspect`.
-#[derive(Debug, Clone)]
-pub struct InspectResult {
-    pub effects: TransactionEffects,
-    /// Indexed `[command_idx][return_slot]`.
-    pub returns: Vec<Vec<Vec<u8>>>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DecodeError {
-    #[error("argument {0:?} is not a command result")]
-    NotAReturn(Argument),
-    #[error("no return slot for argument {0:?}")]
-    NotFound(Argument),
-    #[error("bcs decode: {0}")]
-    Bcs(#[from] bcs::Error),
+move_bindgen_ext_core::define_backend_traits! {
+    address              = Address,
+    type_tag             = TypeTag,
+    object_id            = ObjectId,
+    object_reference     = iota_sdk_types::ObjectReference,
+    transaction          = Transaction,
+    transaction_effects  = TransactionEffects,
+    user_signature       = UserSignature,
+    digest               = Digest,
+    struct_tag           = StructTag,
+    identifier           = iota_sdk_types::Identifier,
+    argument             = Argument,
 }
 
 impl InspectResult {
@@ -450,34 +66,6 @@ impl InspectResult {
             _ => return Err(DecodeError::NotAReturn(arg)),
         };
         bcs::from_bytes(bytes).map_err(DecodeError::Bcs)
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DryRunError {
-    #[error("dry-run backend: {0}")]
-    Backend(String),
-    #[error("dry-run aborted: {0}")]
-    Aborted(String),
-}
-
-pub type DryRunFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<InspectResult, DryRunError>> + Send + 'a>>;
-
-/// Backend capability for dry-running a transaction and returning its full
-/// effects + per-slot return values. Used by `PtbBuilder::inspect`.
-pub trait DryRunner: Send + Sync {
-    fn dry_run<'a>(&'a self, tx: &'a Transaction) -> DryRunFuture<'a>;
-}
-
-impl<D: DryRunner + ?Sized> DryRunner for std::sync::Arc<D> {
-    fn dry_run<'a>(&'a self, tx: &'a Transaction) -> DryRunFuture<'a> {
-        D::dry_run(self, tx)
-    }
-}
-impl<D: DryRunner + ?Sized> DryRunner for Box<D> {
-    fn dry_run<'a>(&'a self, tx: &'a Transaction) -> DryRunFuture<'a> {
-        D::dry_run(self, tx)
     }
 }
 
@@ -879,23 +467,6 @@ impl ClientExt for Client {
 // -----------------------------------------------------------------------------
 // Wait support
 // -----------------------------------------------------------------------------
-
-/// Tunables for [`ClientExt::wait_for_effects`] / [`ClientExt::wait_for_object`].
-/// `Default` polls every 250ms with a 10s timeout — enough for normal indexer lag.
-#[derive(Clone, Copy, Debug)]
-pub struct WaitOptions {
-    pub interval: Duration,
-    pub timeout: Duration,
-}
-
-impl Default for WaitOptions {
-    fn default() -> Self {
-        Self {
-            interval: Duration::from_millis(250),
-            timeout: Duration::from_secs(10),
-        }
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum WaitError {

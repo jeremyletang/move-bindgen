@@ -602,10 +602,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "move-bindgen-ext-core"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "primitive-types 0.14.0",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "move-bindgen-ext-sui"
 version = "0.1.0"
 dependencies = [
  "bcs",
+ "move-bindgen-ext-core",
  "primitive-types 0.14.0",
  "serde",
  "sui-sdk-types",

@@ -11,7 +11,7 @@ use counter_iota_rs::counter;
 use iota_sdk_graphql_client::Client;
 use move_bindgen_runtime::*;
 
-const COUNTER_ID: &str = "0x17b5fb620158dc2d08f9456415314b6f80b62432b28bebc7c7ac906e2509f4ea";
+const COUNTER_ID: &str = "0xf2850c3a3b6a4abccb9602ee454a578ad4f01bafeb492833621f05f72f97fd36";
 const PACKAGE_ADDR: &str = "0xc27f4d59eb52aee53c5398037de235adecc9642407a9a7c67d99178de65ad368";
 
 #[tokio::main]

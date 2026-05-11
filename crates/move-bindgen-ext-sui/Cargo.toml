@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Sui backend traits + GraphQL-client integration consumed by move-bindgen-runtime-sui."
 
 [dependencies]
+move-bindgen-ext-core.workspace = true
 serde.workspace                 = true
 bcs.workspace                   = true
 thiserror.workspace             = true

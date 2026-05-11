@@ -8,6 +8,7 @@ repository.workspace = true
 description = "IOTA backend traits + GraphQL-client integration consumed by move-bindgen-runtime-iota"
 
 [dependencies]
+move-bindgen-ext-core.workspace        = true
 iota-sdk-types.workspace               = true
 iota-sdk-transaction-builder.workspace = true
 iota-sdk-graphql-client.workspace      = true
