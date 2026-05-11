@@ -6,6 +6,11 @@ on:
     paths:
       - "book/**"
       - ".github/workflows/book.yml"
+  pull_request:
+    branches: ["master"]
+    paths:
+      - "book/**"
+      - ".github/workflows/book.yml"
   # Allow manual runs from the Actions tab.
   workflow_dispatch:
 
@@ -47,6 +52,11 @@ jobs:
 
   deploy:
     name: Deploy to Pages
+    # Only deploy on pushes to master — PR runs build the book as a
+    # check but don't publish. `actions/deploy-pages` won't work
+    # from a PR anyway (no `pages: write` on the fork token), so
+    # we skip the job entirely to keep the Actions UI clean.
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:
