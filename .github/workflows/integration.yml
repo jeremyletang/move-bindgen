@@ -91,7 +91,7 @@ jobs:
               --runtime-path ../../crates/move-bindgen-runtime-iota \
               -o generated/counter-iota-rs
           (cd generated/counter-iota-rs && cargo check)
-          (cd tests/counter-smoke-iota && cargo test)
+          (cd tests/counter-smoke-iota && cargo test && cargo check --examples)
 
       - name: Smoke-test — Sui counter (generate + type-check + offline PTB test)
         # Mirror of the IOTA smoke for the Sui flavour. The generated
@@ -102,7 +102,7 @@ jobs:
           ./target/debug/move-bindgen install  --config configs/counter-sui.toml
           ./target/debug/move-bindgen generate --config configs/counter-sui.toml
           (cd configs/counter-sui-rs && cargo check)
-          (cd tests/counter-smoke-sui && cargo test)
+          (cd tests/counter-smoke-sui && cargo test && cargo check --examples)
 
       - name: Smoke-test — DeepBook v3 workspace build (full Sui multi-package)
         # End-to-end exercise of the Sui workspace path: fetches every

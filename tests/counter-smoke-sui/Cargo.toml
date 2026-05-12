@@ -6,10 +6,13 @@ publish = false
 description = "Offline PTB-construction smoke test for the generated counter-sui-rs bindings."
 
 [dependencies]
-counter-sui-rs       = { path = "../../configs/counter-sui-rs" }
-move-bindgen-runtime = { package = "move-bindgen-runtime-sui", path = "../../crates/move-bindgen-runtime-sui" }
-sui-sdk-types        = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
-tokio                = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+counter-sui-rs          = { path = "../../configs/counter-sui-rs" }
+move-bindgen-runtime    = { package = "move-bindgen-runtime-sui", path = "../../crates/move-bindgen-runtime-sui" }
+sui-sdk-types           = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
+sui-transaction-builder = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
+sui-crypto              = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false, features = ["ed25519", "bech32"] }
+sui-rpc                 = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
+tokio                   = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 
 # Detach from any parent workspace so this crate is independent of the
 # move-bindgen one (counter-sui-rs is its own workspace too).

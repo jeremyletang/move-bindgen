@@ -23,12 +23,13 @@ pub use sui_sdk_types::{
 pub use sui_transaction_builder::TransactionBuilder;
 
 pub use move_bindgen_ext_sui::{
-    pure_bytes_of, u256_le, Argument, DecodeError, DryRunError, DryRunEstimateFuture, DryRunFuture,
-    DryRunner, EventReader, EventReaderError, EventsByTxFuture, FetchError, FetchFuture,
-    FetchedObject, Fetcher, FindByTypeFuture, FindError, GasOracle, InputKind, InspectResult,
-    ListGasCoinsFuture, MoveArg, MoveType, NoPackage, ObjectId, ObjectTypeFinder, OracleError,
-    PTBArgument, PackageAddrs, PackageRegistry, PureBytes, Receiving, RefGasPriceFuture, Shared,
-    SharedMut, SubmitError, SubmitFuture, Submitter, SuggestBudgetFuture, U256,
+    pure_bytes_of, u256_le, Argument, ClientExt, DecodeError, DryRunError, DryRunEstimateFuture,
+    DryRunFuture, DryRunner, EventReader, EventReaderError, EventsByTxFuture, FetchError,
+    FetchFuture, FetchedObject, Fetcher, FindByTypeFuture, FindError, GasOracle, GetError,
+    InputKind, InspectResult, ListGasCoinsFuture, MoveArg, MoveType, NoPackage, ObjectId,
+    ObjectTypeFinder, OracleError, PTBArgument, PackageAddrs, PackageRegistry, PureBytes,
+    Receiving, RefGasPriceFuture, Shared, SharedMut, SubmitError, SubmitFuture, Submitter,
+    SuggestBudgetFuture, WaitError, WaitOptions, U256,
 };
 
 pub mod arguments;

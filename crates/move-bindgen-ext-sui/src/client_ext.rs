@@ -75,6 +75,27 @@ pub trait ClientExt {
     where
         T: MoveType + serde::de::DeserializeOwned;
 
+    /// Read the dynamic field at `(parent, key)` and decode its value
+    /// as `V`. Both type tags resolve against `addrs`. Sui dynamic
+    /// fields are stored as `0x2::dynamic_field::Field<K, V>` objects
+    /// whose ids are derived from `hash(parent || key_bytes ||
+    /// key_type_tag)`; this method derives the child id, fetches it,
+    /// and extracts the `value: V` from the wrapper.
+    ///
+    /// Unlike the iota side, `K` must be `DeserializeOwned` too — Sui
+    /// doesn't expose a typed `dynamic_field` lookup that returns the
+    /// value bytes directly, so we deserialize the whole `Field<K, V>`
+    /// wrapper to skip the `name: K` slot.
+    async fn get_dynamic_field<K, V>(
+        &self,
+        parent: ObjectId,
+        key: K,
+        addrs: &impl PackageAddrs,
+    ) -> Result<V, GetError>
+    where
+        K: MoveType + serde::Serialize + serde::de::DeserializeOwned,
+        V: MoveType + serde::de::DeserializeOwned;
+
     /// Block until every object changed by `effects` is observable at
     /// its post-execution version.
     async fn wait_for_effects(
@@ -156,6 +177,55 @@ impl ClientExt for Client {
             out.push(decode_object_as::<T>(*id, &obj, addrs)?);
         }
         Ok(out)
+    }
+
+    async fn get_dynamic_field<K, V>(
+        &self,
+        parent: ObjectId,
+        key: K,
+        addrs: &impl PackageAddrs,
+    ) -> Result<V, GetError>
+    where
+        K: MoveType + serde::Serialize + serde::de::DeserializeOwned,
+        V: MoveType + serde::de::DeserializeOwned,
+    {
+        let key_bytes =
+            bcs::to_bytes(&key).map_err(|e| GetError::Backend(format!("bcs encode key: {e}")))?;
+        let key_type = K::type_tag(addrs);
+        let child_id = parent.derive_dynamic_child_id(&key_type, &key_bytes);
+
+        let mut client = self.clone();
+        let req = proto::GetObjectRequest::default()
+            .with_object_id(child_id.to_string())
+            .with_read_mask(FieldMask::from_paths(["bcs"]));
+        let response = client
+            .ledger_client()
+            .get_object(req)
+            .await
+            .map_err(|e| GetError::Backend(e.to_string()))?
+            .into_inner();
+        let proto_obj = response.object.ok_or(GetError::NotFound(child_id))?;
+        let obj = Object::try_from(&proto_obj)
+            .map_err(|e| GetError::Backend(format!("decode object: {e}")))?;
+        let move_struct = obj
+            .as_struct()
+            .ok_or(GetError::NotAStruct { id: child_id })?;
+        // BCS layout of `0x2::dynamic_field::Field<K, V>`:
+        // `UID(=Address) || bcs(K) || bcs(V)`. We deserialize a
+        // synthetic tuple-struct that pulls all three out at once
+        // and returns just the value.
+        #[derive(serde::Deserialize)]
+        struct Field<K, V> {
+            _id: Address,
+            _name: K,
+            value: V,
+        }
+        let field: Field<K, V> =
+            bcs::from_bytes(move_struct.contents()).map_err(|source| GetError::Bcs {
+                id: child_id,
+                source,
+            })?;
+        Ok(field.value)
     }
 
     async fn wait_for_effects(
