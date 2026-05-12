@@ -71,7 +71,12 @@ fn emit_function(
     };
 
     // 3. Value parameters — drop TxContext, then generate one Rust param +
-    //    `into_argument` site per remaining Move param.
+    //    `into_argument*` site per remaining Move param.
+    //
+    // Reference kind: pick `_ref` / `_mut` only for object-shape params
+    // (`&T` / `&mut T` where the inner is a `Datatype` or `TypeParameter`).
+    // For primitives (`&u64` etc.) the Move PTB validator wouldn't accept
+    // them as inputs anyway, so the bare `into_argument` path is fine.
     let mut params_decl = TokenStream::new();
     let mut arg_exprs: Vec<TokenStream> = Vec::new();
     let mut arg_idx = 0usize;
@@ -83,8 +88,13 @@ fn emit_function(
         let pname = format_ident!("arg{arg_idx}");
         let aname = format_ident!("a{arg_idx}");
         params_decl.extend(quote! { , #pname: #bound });
+        let into_call = match into_argument_method(p) {
+            RefKind::Owned => quote!(into_argument),
+            RefKind::Ref => quote!(into_argument_ref),
+            RefKind::Mut => quote!(into_argument_mut),
+        };
         arg_exprs.push(quote! {
-            let #aname = #pname.into_argument(b).await;
+            let #aname = #pname.#into_call(b).await;
         });
         arg_idx += 1;
     }
@@ -174,6 +184,40 @@ fn emit_function(
             #body_tail
         }
     })
+}
+
+/// How the Move parameter receives its argument — picks which trait
+/// method codegen calls on the user's argument value.
+enum RefKind {
+    /// By-value (no leading `&` / `&mut`) — generic types or owned object
+    /// types. Uses the trait's default `into_argument` body.
+    Owned,
+    /// `&T` — immutable reference. Routes bare `ObjectId` through
+    /// `Shared(_)` for the correct on-chain shared-input lock.
+    Ref,
+    /// `&mut T` — mutable reference. Routes bare `ObjectId` through
+    /// `SharedMut(_)`.
+    Mut,
+}
+
+/// Pick the [`RefKind`] for a Move parameter. References on
+/// non-object/non-generic types (e.g. `&u64`) collapse to `Owned`
+/// because their bindings go through `Pure*` traits, which don't
+/// expose the `_ref` / `_mut` variants.
+fn into_argument_method(ty: &Type<Identifier>) -> RefKind {
+    let (is_mut, inner) = match ty {
+        Type::Reference(is_mut, inner) => (*is_mut, inner.as_ref()),
+        _ => return RefKind::Owned,
+    };
+    let routes_through_arg_trait = matches!(inner, Type::Datatype(_) | Type::TypeParameter(_),);
+    if !routes_through_arg_trait {
+        return RefKind::Owned;
+    }
+    if is_mut {
+        RefKind::Mut
+    } else {
+        RefKind::Ref
+    }
 }
 
 /// Map a Move parameter type to its Rust trait bound (`impl SomeTrait`).

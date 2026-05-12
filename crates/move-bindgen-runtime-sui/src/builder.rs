@@ -306,8 +306,23 @@ impl PtbBuilder {
 
     /// Resolve an `ObjectId` to an `Argument` by consulting the cache.
     /// Cache miss with a [`Fetcher`] attached fetches+caches first;
-    /// without one, panics.
+    /// without one, panics. By-value entrypoint — defaults shared
+    /// objects to `mutable=true` (the permissive lock).
     pub async fn resolve_object(&mut self, id: ObjectId) -> Argument {
+        self.resolve_object_inner(id, /* shared_mutable */ true)
+            .await
+    }
+
+    /// Like [`Self::resolve_object`] but lets the caller pick the
+    /// shared-input mutability per call. Codegen routes
+    /// `into_argument_ref` / `into_argument_mut` on `ObjectId`
+    /// through here so each Move `&T` / `&mut T` parameter gets the
+    /// right on-chain lock independent of how the object was cached.
+    pub async fn resolve_object_shared(&mut self, id: ObjectId, mutable: bool) -> Argument {
+        self.resolve_object_inner(id, mutable).await
+    }
+
+    async fn resolve_object_inner(&mut self, id: ObjectId, shared_mutable: bool) -> Argument {
         if self.inner.cache.lookup(&id).is_none() {
             // Best-effort: if a fetcher is configured, populate the
             // cache so the lookup below succeeds. If the fetch fails
@@ -330,14 +345,11 @@ impl PtbBuilder {
             )),
             Some(CachedObject::Shared {
                 initial_shared_version,
-            }) => self
-                .inner
-                .tx
-                // Default to mutable — it's the permissive lock, and most
-                // Move calls that take a shared object want `&mut`. Use a
-                // `Shared<ObjectId>` wrapper at the call site for the
-                // immutable-shared case.
-                .object(ObjectInput::shared(id, initial_shared_version, true)),
+            }) => self.inner.tx.object(ObjectInput::shared(
+                id,
+                initial_shared_version,
+                shared_mutable,
+            )),
             None => panic!(
                 "object {id:?} is not in the cache; register it via \
                  `PtbBuilder::register_shared/register_owned/register_immutable` \

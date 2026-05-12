@@ -99,6 +99,22 @@ macro_rules! decl_pure_trait {
             {
                 b.inner.apply_argument(self)
             }
+            // Pure (BCS) inputs have no on-chain mutability distinction;
+            // codegen still calls `_ref` / `_mut` for Move `&T` /
+            // `&mut T` parameters of pure shape, so the trait must
+            // expose them. Both default to `into_argument`.
+            #[allow(async_fn_in_trait)]
+            async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+            where Self: Sized,
+            {
+                self.into_argument(b).await
+            }
+            #[allow(async_fn_in_trait)]
+            async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+            where Self: Sized,
+            {
+                self.into_argument(b).await
+            }
         }
         impl $trait_name for $ty {}
         impl $trait_name for Argument {}

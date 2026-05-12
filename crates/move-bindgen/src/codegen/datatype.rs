@@ -346,9 +346,14 @@ fn argument_trait(type_name: &Identifier, g: &Generics, abilities: AbilitySet) -
     let args = &g.args; // <T0, …>
 
     if abilities.has_key() {
-        // Object trait. The default `into_argument` body delegates to the
-        // SDK; the `ObjectId` impl overrides it for cache-aware resolution
-        // (with optional Fetcher fallback for unknown ids).
+        // Object trait. `into_argument` is the by-value pathway (used for
+        // owned Move params). `into_argument_ref` / `into_argument_mut`
+        // are emitted by the function codegen when the Move signature has
+        // `&T` / `&mut T`; for a bare `ObjectId` they route through
+        // `Shared(_)` / `SharedMut(_)` so the input slot carries the
+        // right mutability. The default bodies fall back to
+        // `into_argument` so existing wrappers (`Shared<ObjectId>` etc.)
+        // and `Argument` pass-throughs keep working unchanged.
         quote! {
             pub trait #trait_name #decl: PTBArgument {
                 #[allow(async_fn_in_trait)]
@@ -357,11 +362,33 @@ fn argument_trait(type_name: &Identifier, g: &Generics, abilities: AbilitySet) -
                 {
                     b.inner.apply_argument(self)
                 }
+                #[allow(async_fn_in_trait)]
+                async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+                where Self: Sized,
+                {
+                    self.into_argument(b).await
+                }
+                #[allow(async_fn_in_trait)]
+                async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+                where Self: Sized,
+                {
+                    self.into_argument(b).await
+                }
             }
             impl #decl #trait_name #args for Argument {}
             impl #decl #trait_name #args for ObjectId {
                 async fn into_argument(self, b: &mut PtbBuilder) -> Argument {
                     b.resolve_object(self).await
+                }
+                async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument {
+                    // Goes through the async resolver so an attached
+                    // Fetcher can lazily populate the cache for shared
+                    // objects. The synchronous `apply_argument` path
+                    // can't await a fetch.
+                    b.resolve_object_shared(self, false).await
+                }
+                async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument {
+                    b.resolve_object_shared(self, true).await
                 }
             }
             impl #decl #trait_name #args for ObjectReference {}
@@ -403,6 +430,22 @@ fn argument_trait(type_name: &Identifier, g: &Generics, abilities: AbilitySet) -
                 where Self: Sized,
                 {
                     b.inner.apply_argument(self)
+                }
+                // Value types have no on-chain mutability distinction;
+                // codegen still calls `_ref` / `_mut` for Move `&T` /
+                // `&mut T` parameters of value-shape so the trait must
+                // expose them. Both default to `into_argument`.
+                #[allow(async_fn_in_trait)]
+                async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+                where Self: Sized,
+                {
+                    self.into_argument(b).await
+                }
+                #[allow(async_fn_in_trait)]
+                async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+                where Self: Sized,
+                {
+                    self.into_argument(b).await
                 }
             }
             impl #move_arg_decl #trait_name #args for #name #args {}
