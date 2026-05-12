@@ -14,6 +14,25 @@ use sui_sdk_types::{
 
 use crate::{MoveType, ObjectId, PackageAddrs};
 
+/// Read-mask paths that cover every field
+/// `sui_sdk_types::Object::try_from(&proto::Object)` consults. Used by
+/// the typed-read helpers below.
+const OBJECT_READ_PATHS: [&str; 9] = [
+    "object_id",
+    "version",
+    "digest",
+    "owner",
+    "object_type",
+    "has_public_transfer",
+    "contents",
+    "previous_transaction",
+    "storage_rebate",
+];
+
+fn object_read_mask() -> FieldMask {
+    FieldMask::from_paths(OBJECT_READ_PATHS)
+}
+
 /// Indexer-poll defaults — duplicated from the iota crate's
 /// [`crate::WaitOptions`] (which is re-exported but lives in
 /// `ext-core`). Keeps the surface identical so codegen + examples can
@@ -125,7 +144,7 @@ impl ClientExt for Client {
         let mut client = self.clone();
         let req = proto::GetObjectRequest::default()
             .with_object_id(id.to_string())
-            .with_read_mask(FieldMask::from_paths(["bcs"]));
+            .with_read_mask(object_read_mask());
         let response = client
             .ledger_client()
             .get_object(req)
@@ -156,7 +175,7 @@ impl ClientExt for Client {
             .collect();
         let req = proto::BatchGetObjectsRequest::default()
             .with_requests(requests)
-            .with_read_mask(FieldMask::from_paths(["bcs"]));
+            .with_read_mask(object_read_mask());
         let response = client
             .ledger_client()
             .batch_get_objects(req)
@@ -197,7 +216,7 @@ impl ClientExt for Client {
         let mut client = self.clone();
         let req = proto::GetObjectRequest::default()
             .with_object_id(child_id.to_string())
-            .with_read_mask(FieldMask::from_paths(["bcs"]));
+            .with_read_mask(object_read_mask());
         let response = client
             .ledger_client()
             .get_object(req)
@@ -307,7 +326,7 @@ async fn poll_for_version(
         let req = proto::GetObjectRequest::default()
             .with_object_id(id.to_string())
             .with_version(version)
-            .with_read_mask(FieldMask::from_paths(["bcs"]));
+            .with_read_mask(object_read_mask());
         match c.ledger_client().get_object(req).await {
             Ok(resp) => {
                 if let Some(obj) = resp.into_inner().object {

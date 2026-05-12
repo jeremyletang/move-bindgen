@@ -14,9 +14,9 @@ use sui_rpc::Client;
 
 /// On-chain id of the shared `Counter`. Replace with the id printed by
 /// your own `sui client publish` deployment.
-const COUNTER_ID: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const COUNTER_ID: &str = "0x28b54df6a98b22df5820bfe250e373b4732adf8aa8e1413d4a2bd956b4f6718d";
 /// On-chain address the counter package is published at.
-const PACKAGE_ADDR: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const PACKAGE_ADDR: &str = "0x06991aed137283b8d40a3511250a78805460c7dcf1b5d1fbb7c56a534b17825a";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

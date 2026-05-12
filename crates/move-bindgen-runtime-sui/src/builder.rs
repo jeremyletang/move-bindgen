@@ -333,7 +333,11 @@ impl PtbBuilder {
             }) => self
                 .inner
                 .tx
-                .object(ObjectInput::shared(id, initial_shared_version, false)),
+                // Default to mutable — it's the permissive lock, and most
+                // Move calls that take a shared object want `&mut`. Use a
+                // `Shared<ObjectId>` wrapper at the call site for the
+                // immutable-shared case.
+                .object(ObjectInput::shared(id, initial_shared_version, true)),
             None => panic!(
                 "object {id:?} is not in the cache; register it via \
                  `PtbBuilder::register_shared/register_owned/register_immutable` \

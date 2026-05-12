@@ -99,9 +99,14 @@ impl Submitter for Client {
             let req = proto::ExecuteTransactionRequest::default()
                 .with_transaction(proto_tx)
                 .with_signatures(proto_sigs)
+                // Paths are rooted at `ExecutedTransaction` (the proto
+                // default is `effects.status,checkpoint`), not at the
+                // wrapping response. We need the BCS-encoded effects
+                // so `TransactionEffects::try_from(&proto)` can decode
+                // them.
                 .with_read_mask(FieldMask::from_paths([
-                    "transaction.effects.bcs",
-                    "transaction.effects.status",
+                    "effects.bcs",
+                    "effects.status",
                 ]));
             let response = client
                 .execution_client()
