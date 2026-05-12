@@ -634,6 +634,7 @@ dependencies = [
  "move-core-types",
  "primitive-types 0.14.0",
  "serde",
+ "sui-crypto",
  "sui-sdk-types",
  "sui-transaction-builder",
  "thiserror 2.0.18",
@@ -1111,6 +1112,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "signature"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1133,6 +1140,15 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "sui-crypto"
+version = "0.3.0"
+source = "git+https://github.com/mystenlabs/sui-rust-sdk.git?rev=355d9ddf1c2e939fcc378a9733800e7d2caf4612#355d9ddf1c2e939fcc378a9733800e7d2caf4612"
+dependencies = [
+ "signature",
+ "sui-sdk-types",
+]
 
 [[package]]
 name = "sui-sdk-types"

@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use crate::{
     cache::SharedObjectInfo, Address, Argument, Command, DryRunner, DynSigner, FetchError,
-    FetchedObject, Fetcher, GasOracle, Identifier, InspectResult, Input, MoveCall, ObjectCache,
+    FetchedObject, Fetcher, GasOracle, Identifier, Input, InspectResult, MoveCall, ObjectCache,
     ObjectId, ObjectReference, OracleError, PackageAddrs, SharedObjectReference, SignError,
     SubmitError, Submitter, Transaction, TransactionBuilder, TransactionEffects, TypeTag, Version,
 };

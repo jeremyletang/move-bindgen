@@ -5811,6 +5811,7 @@ dependencies = [
  "move-core-types 0.0.4 (git+https://github.com/iotaledger/iota.git?rev=555e20ec91)",
  "primitive-types 0.14.0",
  "serde",
+ "sui-crypto 0.3.0 (git+https://github.com/mystenlabs/sui-rust-sdk.git?rev=355d9ddf1c2e939fcc378a9733800e7d2caf4612)",
  "sui-sdk-types 0.3.1",
  "sui-transaction-builder 0.3.1",
  "thiserror 2.0.18",
@@ -10181,6 +10182,15 @@ dependencies = [
 [[package]]
 name = "sui-crypto"
 version = "0.3.0"
+source = "git+https://github.com/mystenlabs/sui-rust-sdk.git?rev=355d9ddf1c2e939fcc378a9733800e7d2caf4612#355d9ddf1c2e939fcc378a9733800e7d2caf4612"
+dependencies = [
+ "signature 2.2.0",
+ "sui-sdk-types 0.3.1",
+]
+
+[[package]]
+name = "sui-crypto"
+version = "0.3.0"
 source = "git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=e494a36a76a0aab8c5d66d5557995faee5c1fb09#e494a36a76a0aab8c5d66d5557995faee5c1fb09"
 dependencies = [
  "ark-bn254",
@@ -10749,7 +10759,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sui-config",
- "sui-crypto",
+ "sui-crypto 0.3.0 (git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=e494a36a76a0aab8c5d66d5557995faee5c1fb09)",
  "sui-display",
  "sui-macros",
  "sui-name-service",
@@ -10794,7 +10804,7 @@ dependencies = [
  "serde_with",
  "shared-crypto",
  "sui-config",
- "sui-crypto",
+ "sui-crypto 0.3.0 (git+https://github.com/MystenLabs/sui-rust-sdk.git?rev=e494a36a76a0aab8c5d66d5557995faee5c1fb09)",
  "sui-json",
  "sui-json-rpc-api",
  "sui-json-rpc-types",

@@ -34,15 +34,19 @@ pub use move_bindgen_ext_sui::{
 pub mod arguments;
 pub mod builder;
 pub mod cache;
+pub mod effects;
 pub mod framework;
+pub mod signer;
 
 pub use arguments::{
     ArgumentObject, PureAddress, PureBool, PureID, PureOption, PureString, PureU128, PureU16,
     PureU256, PureU32, PureU64, PureU8, PureVec,
 };
-pub use builder::{InnerBuilder, PtbBuilder};
+pub use builder::{ExecuteError, InnerBuilder, PtbBuilder};
 pub use cache::{CachedObject, ObjectCache};
+pub use effects::{EffectsExt, EventsError};
 pub use framework::{make_struct_tag, ID, SUI_FRAMEWORK_ADDRESS, UID};
+pub use signer::{DynSigner, SignError, SignFuture};
 
 #[cfg(test)]
 mod tests {

@@ -271,10 +271,8 @@ macro_rules! define_backend_traits {
         ) -> $TypeTag {
             <$TypeTag>::Struct(Box::new(<$StructTag>::new(
                 addr,
-                <$Identifier>::new(module)
-                    .expect("static module name is a valid Move identifier"),
-                <$Identifier>::new(name)
-                    .expect("static datatype name is a valid Move identifier"),
+                <$Identifier>::new(module).expect("static module name is a valid Move identifier"),
+                <$Identifier>::new(name).expect("static datatype name is a valid Move identifier"),
                 params,
             )))
         }
@@ -283,43 +281,67 @@ macro_rules! define_backend_traits {
             type Package = $crate::NoPackage;
             const MODULE: &'static str = "";
             const NAME: &'static str = "";
-            fn type_tag(_: &impl PackageAddrs) -> $TypeTag { <$TypeTag>::Bool }
-            fn type_tag_at(_: $Address) -> $TypeTag { <$TypeTag>::Bool }
+            fn type_tag(_: &impl PackageAddrs) -> $TypeTag {
+                <$TypeTag>::Bool
+            }
+            fn type_tag_at(_: $Address) -> $TypeTag {
+                <$TypeTag>::Bool
+            }
         }
         impl MoveType for u8 {
             type Package = $crate::NoPackage;
             const MODULE: &'static str = "";
             const NAME: &'static str = "";
-            fn type_tag(_: &impl PackageAddrs) -> $TypeTag { <$TypeTag>::U8 }
-            fn type_tag_at(_: $Address) -> $TypeTag { <$TypeTag>::U8 }
+            fn type_tag(_: &impl PackageAddrs) -> $TypeTag {
+                <$TypeTag>::U8
+            }
+            fn type_tag_at(_: $Address) -> $TypeTag {
+                <$TypeTag>::U8
+            }
         }
         impl MoveType for u16 {
             type Package = $crate::NoPackage;
             const MODULE: &'static str = "";
             const NAME: &'static str = "";
-            fn type_tag(_: &impl PackageAddrs) -> $TypeTag { <$TypeTag>::U16 }
-            fn type_tag_at(_: $Address) -> $TypeTag { <$TypeTag>::U16 }
+            fn type_tag(_: &impl PackageAddrs) -> $TypeTag {
+                <$TypeTag>::U16
+            }
+            fn type_tag_at(_: $Address) -> $TypeTag {
+                <$TypeTag>::U16
+            }
         }
         impl MoveType for u32 {
             type Package = $crate::NoPackage;
             const MODULE: &'static str = "";
             const NAME: &'static str = "";
-            fn type_tag(_: &impl PackageAddrs) -> $TypeTag { <$TypeTag>::U32 }
-            fn type_tag_at(_: $Address) -> $TypeTag { <$TypeTag>::U32 }
+            fn type_tag(_: &impl PackageAddrs) -> $TypeTag {
+                <$TypeTag>::U32
+            }
+            fn type_tag_at(_: $Address) -> $TypeTag {
+                <$TypeTag>::U32
+            }
         }
         impl MoveType for u64 {
             type Package = $crate::NoPackage;
             const MODULE: &'static str = "";
             const NAME: &'static str = "";
-            fn type_tag(_: &impl PackageAddrs) -> $TypeTag { <$TypeTag>::U64 }
-            fn type_tag_at(_: $Address) -> $TypeTag { <$TypeTag>::U64 }
+            fn type_tag(_: &impl PackageAddrs) -> $TypeTag {
+                <$TypeTag>::U64
+            }
+            fn type_tag_at(_: $Address) -> $TypeTag {
+                <$TypeTag>::U64
+            }
         }
         impl MoveType for u128 {
             type Package = $crate::NoPackage;
             const MODULE: &'static str = "";
             const NAME: &'static str = "";
-            fn type_tag(_: &impl PackageAddrs) -> $TypeTag { <$TypeTag>::U128 }
-            fn type_tag_at(_: $Address) -> $TypeTag { <$TypeTag>::U128 }
+            fn type_tag(_: &impl PackageAddrs) -> $TypeTag {
+                <$TypeTag>::U128
+            }
+            fn type_tag_at(_: $Address) -> $TypeTag {
+                <$TypeTag>::U128
+            }
         }
 
         impl MoveType for ::primitive_types::U256 {
@@ -390,11 +412,7 @@ macro_rules! define_backend_traits {
         }
 
         pub type FetchFuture<'a> = ::std::pin::Pin<
-            Box<
-                dyn ::std::future::Future<Output = Result<FetchedObject, FetchError>>
-                    + Send
-                    + 'a,
-            >,
+            Box<dyn ::std::future::Future<Output = Result<FetchedObject, FetchError>> + Send + 'a>,
         >;
 
         pub trait Fetcher: Send + Sync {
@@ -416,9 +434,8 @@ macro_rules! define_backend_traits {
 
         pub type SubmitFuture<'a> = ::std::pin::Pin<
             Box<
-                dyn ::std::future::Future<
-                        Output = Result<$TransactionEffects, $crate::SubmitError>,
-                    > + Send
+                dyn ::std::future::Future<Output = Result<$TransactionEffects, $crate::SubmitError>>
+                    + Send
                     + 'a,
             >,
         >;
@@ -465,9 +482,8 @@ macro_rules! define_backend_traits {
 
         pub type ListGasCoinsFuture<'a> = ::std::pin::Pin<
             Box<
-                dyn ::std::future::Future<
-                        Output = Result<Vec<$ObjectReference>, OracleError>,
-                    > + Send
+                dyn ::std::future::Future<Output = Result<Vec<$ObjectReference>, OracleError>>
+                    + Send
                     + 'a,
             >,
         >;
@@ -495,10 +511,7 @@ macro_rules! define_backend_traits {
             /// `PtbBuilder` adds a safety margin and uses this when
             /// `with_auto_gas` is on. Default returns
             /// `Err(OracleError::Unsupported)` so backends can opt in.
-            fn dry_run_estimate<'a>(
-                &'a self,
-                _tx: &'a $Transaction,
-            ) -> DryRunEstimateFuture<'a> {
+            fn dry_run_estimate<'a>(&'a self, _tx: &'a $Transaction) -> DryRunEstimateFuture<'a> {
                 Box::pin(async { Err(OracleError::Unsupported("dry_run_estimate")) })
             }
         }
@@ -536,9 +549,8 @@ macro_rules! define_backend_traits {
 
         pub type FindByTypeFuture<'a> = ::std::pin::Pin<
             Box<
-                dyn ::std::future::Future<
-                        Output = Result<Vec<$ObjectReference>, $crate::FindError>,
-                    > + Send
+                dyn ::std::future::Future<Output = Result<Vec<$ObjectReference>, $crate::FindError>>
+                    + Send
                     + 'a,
             >,
         >;
@@ -577,9 +589,8 @@ macro_rules! define_backend_traits {
 
         pub type EventsByTxFuture<'a> = ::std::pin::Pin<
             Box<
-                dyn ::std::future::Future<
-                        Output = Result<Vec<Vec<u8>>, $crate::EventReaderError>,
-                    > + Send
+                dyn ::std::future::Future<Output = Result<Vec<Vec<u8>>, $crate::EventReaderError>>
+                    + Send
                     + 'a,
             >,
         >;

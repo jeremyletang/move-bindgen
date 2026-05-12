@@ -7,9 +7,7 @@ use iota_sdk_graphql_client::{
     Client, PaginationFilter,
 };
 use iota_sdk_transaction_builder::unresolved::Argument;
-use iota_sdk_types::{
-    Address, Digest, ObjectId, Owner, Transaction, TypeTag, UserSignature,
-};
+use iota_sdk_types::{Address, Digest, ObjectId, Owner, Transaction, TypeTag, UserSignature};
 
 use crate::{
     DecodeError, DryRunError, DryRunEstimateFuture, DryRunFuture, DryRunner, EventReader,
