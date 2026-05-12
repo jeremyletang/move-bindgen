@@ -41,11 +41,35 @@ pub trait ArgumentObject<T>: PTBArgument {
     {
         b.inner.apply_argument(self)
     }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
 }
 impl<T> ArgumentObject<T> for Argument {}
 impl<T> ArgumentObject<T> for ObjectId {
     async fn into_argument(self, b: &mut PtbBuilder) -> Argument {
         b.resolve_object(self).await
+    }
+    async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument {
+        // Goes through the async resolver so the Fetcher can lazily
+        // populate the cache. `apply_argument(Shared(self))` would
+        // require the cache to already have the entry — that
+        // synchronous path can't await a fetch.
+        b.resolve_object_shared(self, false).await
+    }
+    async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument {
+        b.resolve_object_shared(self, true).await
     }
 }
 impl<T> ArgumentObject<T> for ObjectReference {}
@@ -84,6 +108,23 @@ pub trait PureU256 {
     async fn into_argument(self, b: &mut PtbBuilder) -> Argument
     where
         Self: Sized;
+    // Pure inputs have no on-chain mutability distinction; codegen
+    // still emits `_ref` / `_mut` for `&T` / `&mut T` params, so both
+    // default to `into_argument`.
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
 }
 
 impl PureU256 for U256 {
@@ -108,6 +149,20 @@ pub trait PureVec<T>: PTBArgument {
     {
         b.inner.apply_argument(self)
     }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
 }
 impl<T: MoveArg> PureVec<T> for Vec<T> {}
 impl<T> PureVec<T> for Argument {}
@@ -121,6 +176,20 @@ pub trait PureOption<T>: PTBArgument {
         Self: Sized,
     {
         b.inner.apply_argument(self)
+    }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
     }
 }
 impl<T: MoveArg> PureOption<T> for Option<T> {}

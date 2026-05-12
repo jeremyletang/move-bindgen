@@ -191,7 +191,27 @@ impl PtbBuilder {
     /// Cache miss with [`Fetcher`] attached → fetch, cache, return.
     /// Cache miss without fetcher → bare-id input (SDK errors at finish time
     /// if it never gets resolved).
+    ///
+    /// For shared objects this uses whatever `mutable` flag was cached
+    /// (or `mutable=true` from the fetcher's default). Codegen-driven
+    /// per-call mutability goes through [`Self::resolve_object_shared`].
     pub async fn resolve_object(&mut self, id: ObjectId) -> Argument {
+        self.resolve_object_inner(id, None).await
+    }
+
+    /// Like [`Self::resolve_object`] but pins the shared-input
+    /// mutability for this call only — useful for codegen routing
+    /// `&T` / `&mut T` parameters through `Shared(_)` / `SharedMut(_)`
+    /// regardless of how the object was cached.
+    pub async fn resolve_object_shared(&mut self, id: ObjectId, mutable: bool) -> Argument {
+        self.resolve_object_inner(id, Some(mutable)).await
+    }
+
+    async fn resolve_object_inner(
+        &mut self,
+        id: ObjectId,
+        override_mutable: Option<bool>,
+    ) -> Argument {
         if let Some(r) = self.cache.owned.get(&id).cloned() {
             return self.inner.input(Input::ImmutableOrOwned(r));
         }
@@ -199,7 +219,7 @@ impl PtbBuilder {
             return self.inner.input(Input::Shared(SharedObjectReference {
                 object_id: id,
                 initial_shared_version: Version::from_u64(info.initial_shared_version),
-                mutable: info.mutable,
+                mutable: override_mutable.unwrap_or(info.mutable),
             }));
         }
 
@@ -226,7 +246,7 @@ impl PtbBuilder {
                 self.inner.input(Input::Shared(SharedObjectReference {
                     object_id: id,
                     initial_shared_version: Version::from_u64(initial_shared_version),
-                    mutable,
+                    mutable: override_mutable.unwrap_or(mutable),
                 }))
             }
             _ => self.inner.apply_argument(id),
