@@ -28,15 +28,15 @@ impl InspectResult {
                 .get(cmd as usize)
                 .and_then(|cmd_returns| cmd_returns.first())
                 .map(Vec::as_slice)
-                .ok_or(DecodeError::NotFound(arg))?,
+                .ok_or_else(|| DecodeError::NotFound(format!("{arg:?}")))?,
             Argument::NestedResult(cmd, sub) => self
                 .returns
                 .get(cmd as usize)
                 .and_then(|cmd_returns| cmd_returns.get(sub as usize))
                 .map(Vec::as_slice)
-                .ok_or(DecodeError::NotFound(arg))?,
+                .ok_or_else(|| DecodeError::NotFound(format!("{arg:?}")))?,
             // `Gas`, `Input(_)`, or any future variant: not a return value.
-            _ => return Err(DecodeError::NotAReturn(arg)),
+            _ => return Err(DecodeError::NotAReturn(format!("{arg:?}"))),
         };
         bcs::from_bytes(bytes).map_err(DecodeError::Bcs)
     }

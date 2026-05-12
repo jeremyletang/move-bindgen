@@ -5780,9 +5780,11 @@ dependencies = [
  "move-bindgen-ext-core",
  "primitive-types 0.14.0",
  "serde",
+ "sui-rpc 0.3.1",
  "sui-sdk-types 0.3.1",
  "sui-transaction-builder 0.3.1",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -10733,6 +10735,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "sui-rpc"
+version = "0.3.1"
+source = "git+https://github.com/mystenlabs/sui-rust-sdk.git?rev=355d9ddf1c2e939fcc378a9733800e7d2caf4612#355d9ddf1c2e939fcc378a9733800e7d2caf4612"
+dependencies = [
+ "base64 0.22.1",
+ "bcs",
+ "bytes",
+ "futures",
+ "http",
+ "http-body",
+ "prost",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "sui-sdk-types 0.3.1",
+ "tap",
+ "tokio",
+ "tonic",
+ "tonic-prost",
+ "tower 0.5.3",
+]
+
+[[package]]
 name = "sui-rpc-api"
 version = "0.1.0"
 source = "git+https://github.com/MystenLabs/sui.git?rev=c188832a5c2f8a48b9998e8c3888874a56bb1ca8#c188832a5c2f8a48b9998e8c3888874a56bb1ca8"
@@ -10765,7 +10790,7 @@ dependencies = [
  "sui-name-service",
  "sui-package-resolver",
  "sui-protocol-config",
- "sui-rpc",
+ "sui-rpc 0.3.0",
  "sui-sdk-types 0.3.0",
  "sui-transaction-builder 0.0.0",
  "sui-transaction-checks",
@@ -10809,7 +10834,7 @@ dependencies = [
  "sui-json-rpc-api",
  "sui-json-rpc-types",
  "sui-keys",
- "sui-rpc",
+ "sui-rpc 0.3.0",
  "sui-rpc-api",
  "sui-sdk-types 0.3.0",
  "sui-transaction-builder 0.0.0",
@@ -10967,7 +10992,7 @@ dependencies = [
  "sui-enum-compat-util",
  "sui-macros",
  "sui-protocol-config",
- "sui-rpc",
+ "sui-rpc 0.3.0",
  "sui-sdk-types 0.3.0",
  "tap",
  "thiserror 1.0.69",

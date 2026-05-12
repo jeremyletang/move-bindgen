@@ -37,11 +37,13 @@ move_bindgen_ext_core::define_backend_traits! {
     digest               = sui_sdk_types::Digest,
     struct_tag           = sui_sdk_types::StructTag,
     identifier           = sui_sdk_types::Identifier,
-    argument             = Argument,
 }
 
+mod client;
+mod client_ext;
 mod input_kind;
 mod move_arg;
 
+pub use client_ext::{ClientExt, GetError, WaitError};
 pub use input_kind::{InputKind, PTBArgument, Receiving, Shared, SharedMut};
 pub use move_arg::{pure_bytes_of, MoveArg, PureBytes};

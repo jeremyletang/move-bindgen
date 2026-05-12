@@ -257,10 +257,7 @@ impl PtbBuilder {
             FetchedObject::Shared {
                 initial_shared_version,
                 ..
-            } => self
-                .inner
-                .cache
-                .register_shared(id, initial_shared_version),
+            } => self.inner.cache.register_shared(id, initial_shared_version),
         }
         Ok(())
     }
@@ -347,11 +344,10 @@ impl PtbBuilder {
 
     /// Set the gas-coin object refs. Disables auto-gas selection of the coin.
     pub fn gas(&mut self, refs: impl IntoIterator<Item = ObjectReference>) -> &mut Self {
-        self.inner
-            .tx
-            .add_gas_objects(refs.into_iter().map(|or| {
-                ObjectInput::owned(*or.object_id(), or.version(), *or.digest())
-            }));
+        self.inner.tx.add_gas_objects(
+            refs.into_iter()
+                .map(|or| ObjectInput::owned(*or.object_id(), or.version(), *or.digest())),
+        );
         self.gas_coin_set = true;
         self
     }
@@ -467,7 +463,9 @@ impl PtbBuilder {
             // gas) doesn't translate. Stick to the oracle's conservative
             // suggestion — callers wanting a tighter budget can call
             // `gas_budget(...)` explicitly.
-            self.inner.tx.set_gas_budget(oracle.suggest_gas_budget().await?);
+            self.inner
+                .tx
+                .set_gas_budget(oracle.suggest_gas_budget().await?);
         }
         Ok(())
     }

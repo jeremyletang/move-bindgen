@@ -146,7 +146,6 @@ pub mod u256_le {
 //     digest               = my_sdk::Digest,
 //     struct_tag           = my_sdk::StructTag,
 //     identifier           = my_sdk::Identifier,
-//     argument             = my_sdk::Argument,
 // }
 // ```
 //
@@ -178,7 +177,6 @@ macro_rules! define_backend_traits {
         digest               = $Digest:ty,
         struct_tag           = $StructTag:ty,
         identifier           = $Identifier:ty,
-        argument             = $Argument:path,
         $(,)?
     ) => {
         // ---- PackageAddrs + PackageRegistry -------------------------------
@@ -639,10 +637,10 @@ macro_rules! define_backend_traits {
 
         #[derive(Debug, ::thiserror::Error)]
         pub enum DecodeError {
-            #[error("argument {0:?} is not a command result")]
-            NotAReturn($Argument),
-            #[error("no return slot for argument {0:?}")]
-            NotFound($Argument),
+            #[error("argument {0} is not a command result")]
+            NotAReturn(String),
+            #[error("no return slot for {0}")]
+            NotFound(String),
             #[error("bcs decode: {0}")]
             Bcs(#[from] ::bcs::Error),
         }

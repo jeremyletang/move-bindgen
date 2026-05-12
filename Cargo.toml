@@ -64,6 +64,7 @@ iota-sdk-graphql-client      = { git = "https://github.com/iotaledger/iota-rust-
 sui-sdk-types          = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
 sui-transaction-builder = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
 sui-crypto             = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
+sui-rpc                = { git = "https://github.com/mystenlabs/sui-rust-sdk.git", rev = "355d9ddf1c2e939fcc378a9733800e7d2caf4612", default-features = false }
 
 # Sui build chain — pinned git deps to mystenlabs/sui. Bump the rev
 # below in lockstep when updating.

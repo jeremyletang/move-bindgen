@@ -13,7 +13,6 @@
 //! - Wait support ([`WaitOptions`] re-exported from core, plus the
 //!   iota-typed [`WaitError`] / [`GetError`] enums).
 
-use iota_sdk_transaction_builder::unresolved::Argument;
 use iota_sdk_types::{
     Address, Digest, ObjectId, StructTag, Transaction, TransactionEffects, TypeTag, UserSignature,
 };
@@ -33,7 +32,6 @@ move_bindgen_ext_core::define_backend_traits! {
     digest               = Digest,
     struct_tag           = StructTag,
     identifier           = iota_sdk_types::Identifier,
-    argument             = Argument,
 }
 
 mod client;
