@@ -104,10 +104,7 @@ impl Submitter for Client {
                 // wrapping response. We need the BCS-encoded effects
                 // so `TransactionEffects::try_from(&proto)` can decode
                 // them.
-                .with_read_mask(FieldMask::from_paths([
-                    "effects.bcs",
-                    "effects.status",
-                ]));
+                .with_read_mask(FieldMask::from_paths(["effects.bcs", "effects.status"]));
             let response = client
                 .execution_client()
                 .execute_transaction(req)
