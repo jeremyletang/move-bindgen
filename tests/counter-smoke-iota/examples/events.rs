@@ -48,7 +48,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let events: Vec<Bumped> = effects.events_of_type::<Bumped>(&client, &addrs).await?;
     println!("emitted {} Bumped event(s):", events.len());
     for ev in &events {
-        println!("  counter={} value={} by={}", ev.counter.bytes, ev.value, ev.by);
+        println!(
+            "  counter={} value={} by={}",
+            ev.counter.bytes, ev.value, ev.by
+        );
     }
 
     Ok(())

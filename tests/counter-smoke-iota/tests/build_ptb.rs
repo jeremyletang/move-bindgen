@@ -34,8 +34,7 @@ async fn increment_call_finalizes_into_a_well_formed_ptb() {
         b[31] = 0xAB;
         b
     });
-    let mut ptb =
-        PtbBuilder::new(sender).with_package::<counter_iota_rs::Package>(package_addr);
+    let mut ptb = PtbBuilder::new(sender).with_package::<counter_iota_rs::Package>(package_addr);
 
     // Counter is shared, AdminCap is owned. Register both before any call.
     let counter_id = fake_object_id(0xC0);
