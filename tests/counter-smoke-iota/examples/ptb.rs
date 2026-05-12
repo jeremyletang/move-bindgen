@@ -8,7 +8,7 @@
 use std::str::FromStr;
 
 use counter_iota_rs::counter::{self, Counter};
-use iota_sdk_crypto::{ToFromBech32, ed25519::Ed25519PrivateKey};
+use iota_sdk_crypto::{ed25519::Ed25519PrivateKey, ToFromBech32};
 use iota_sdk_graphql_client::Client;
 use move_bindgen_runtime::*;
 

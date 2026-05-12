@@ -10,13 +10,24 @@
 //! [`Config`] (validated + path-resolved + ready to feed into codegen).
 //! Most users only see `Config::load` and the `Config` accessors.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
-};
+mod flavour;
+mod package;
+mod runtime;
+mod staging;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
+
+pub use self::flavour::Flavour;
+pub use self::package::{default_crate_name, PackageEntry, PackageSource};
+pub use self::runtime::{RuntimeSpec, DEFAULT_RUNTIME_GIT_URL};
+pub use self::staging::{config_path_in, staging_dir_for};
+
+use self::package::{validate_unique_crate_names, validate_unique_sources, RawPackage};
+use self::runtime::RawRuntime;
 
 const CONFIG_FILE_NAME: &str = "move-bindgen.toml";
 
@@ -25,113 +36,12 @@ const CONFIG_FILE_NAME: &str = "move-bindgen.toml";
 /// codegen time and routed through the runtime re-exports instead.
 pub const DEFAULT_FRAMEWORK_PACKAGES: &[&str] = &["Iota", "MoveStdlib"];
 
-/// Public git URL for `move-bindgen-runtime`. Used as the default
-/// runtime spec in `move-bindgen init` templates and zero-config
-/// `generate` invocations. Tracks `master` — pin via `rev` once we
-/// start cutting tagged releases.
-pub const DEFAULT_RUNTIME_GIT_URL: &str = "https://github.com/jeremyletang/move-bindgen.git";
-
-// -----------------------------------------------------------------------------
-// Public, validated config
-// -----------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputFormat {
     /// One Move package → one Rust crate.
     SingleCrate,
     /// Many Move packages → a Cargo workspace of crates, one per package.
     Workspace,
-}
-
-/// Move chain flavour — chooses which build chain, runtime crate,
-/// and SDK family the generated code targets.
-///
-/// Flavour is per-project. Two flavours don't mix in one workspace
-/// (different SDK type identities). Default is `Iota`.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    clap::ValueEnum,
-)]
-#[serde(rename_all = "lowercase")]
-#[clap(rename_all = "lowercase")]
-pub enum Flavour {
-    #[default]
-    Iota,
-    Sui,
-}
-
-impl Flavour {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Flavour::Iota => "iota",
-            Flavour::Sui => "sui",
-        }
-    }
-}
-
-/// How the generated code should reference `move-bindgen-runtime`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeSpec {
-    /// `path = "..."` (resolved relative to the config file).
-    Path(PathBuf),
-    /// `git = "..." [, rev = "..."]`.
-    Git {
-        url: String,
-        rev: Option<String>,
-        branch: Option<String>,
-        tag: Option<String>,
-    },
-    /// `version = "..."` (crates.io).
-    Version(String),
-}
-
-impl RuntimeSpec {
-    /// Default for templates and zero-config use: a git dep on the
-    /// public move-bindgen repo, tracking master. Pin via `rev` once we
-    /// start cutting tagged releases.
-    pub fn default_git() -> Self {
-        RuntimeSpec::Git {
-            url: DEFAULT_RUNTIME_GIT_URL.to_string(),
-            rev: None,
-            branch: None,
-            tag: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PackageEntry {
-    /// Stable identifier from the `[packages.<id>]` key. Used in error
-    /// messages; not necessarily the Move package name.
-    pub id: String,
-    /// How the package source is fetched / located.
-    pub source: PackageSource,
-    /// Override for the generated crate name. Default derived from the
-    /// source — basename of the path, or basename of the git subdir.
-    pub crate_name_override: Option<String>,
-}
-
-/// Where the Move source for a `[packages.X]` entry lives.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PackageSource {
-    /// Local directory. Resolved against `--input-folder`s.
-    Path(PathBuf),
-    /// Remote git repository. `move-package`'s fetcher handles cloning
-    /// into `~/.move/` and gives us the on-disk path.
-    Git {
-        url: String,
-        rev: Option<String>,
-        branch: Option<String>,
-        tag: Option<String>,
-        subdir: Option<String>,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -305,102 +215,6 @@ impl Config {
     }
 }
 
-/// Default crate name for a package: kebab-cased basename of the
-/// source's "leaf" path component + `"-rs"`. For `Path` sources that's
-/// the directory's basename; for `Git` sources it's the basename of
-/// `subdir` (or the URL's repo segment if no subdir). Falls back to
-/// `package-rs` if nothing usable can be extracted.
-pub fn default_crate_name(source: &PackageSource) -> String {
-    let stem = match source {
-        PackageSource::Path(p) => p.file_name().and_then(|s| s.to_str()).map(str::to_string),
-        PackageSource::Git { url, subdir, .. } => {
-            if let Some(s) = subdir.as_deref() {
-                Path::new(s)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .map(str::to_string)
-            } else {
-                // Last segment of the URL, stripping `.git`.
-                url.rsplit('/')
-                    .find(|s| !s.is_empty())
-                    .map(|s| s.trim_end_matches(".git").to_string())
-            }
-        }
-    };
-    let stem = stem.unwrap_or_else(|| "package".to_string());
-    let kebab: String = stem
-        .chars()
-        .map(|c| {
-            if c == '_' {
-                '-'
-            } else {
-                c.to_ascii_lowercase()
-            }
-        })
-        .collect();
-    format!("{kebab}-rs")
-}
-
-impl PackageEntry {
-    /// Effective crate name: explicit override if set, otherwise
-    /// [`default_crate_name`] derived from the source.
-    pub fn crate_name(&self) -> String {
-        self.crate_name_override
-            .clone()
-            .unwrap_or_else(|| default_crate_name(&self.source))
-    }
-}
-
-impl PackageSource {
-    fn from_raw(id: &str, raw: &RawPackage) -> Result<Self> {
-        let kinds = [
-            raw.path.is_some().then_some("path"),
-            raw.git.is_some().then_some("git"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-        if kinds.is_empty() {
-            bail!("package '{id}' must specify either `path` or `git` as its source");
-        }
-        if kinds.len() > 1 {
-            bail!(
-                "package '{id}' sets multiple sources ({}); pick exactly one",
-                kinds.join(", ")
-            );
-        }
-        if let Some(p) = &raw.path {
-            return Ok(PackageSource::Path(PathBuf::from(p)));
-        }
-        let url = raw.git.clone().expect("git is set");
-        let kinds = [
-            raw.rev.is_some().then_some("rev"),
-            raw.branch.is_some().then_some("branch"),
-            raw.tag.is_some().then_some("tag"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-        if kinds.len() > 1 {
-            bail!(
-                "package '{id}' git source sets multiple of rev/branch/tag ({}); pick at most one",
-                kinds.join(", ")
-            );
-        }
-        Ok(PackageSource::Git {
-            url,
-            rev: raw.rev.clone(),
-            branch: raw.branch.clone(),
-            tag: raw.tag.clone(),
-            subdir: raw.subdir.clone(),
-        })
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Raw (TOML-backing) types
-// -----------------------------------------------------------------------------
-
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     output: RawOutput,
@@ -420,215 +234,6 @@ struct RawOutput {
     #[serde(default)]
     name: Option<String>,
     runtime: RawRuntime,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum RawRuntime {
-    Inline {
-        #[serde(default)]
-        path: Option<String>,
-        #[serde(default)]
-        git: Option<String>,
-        #[serde(default)]
-        rev: Option<String>,
-        #[serde(default)]
-        branch: Option<String>,
-        #[serde(default)]
-        tag: Option<String>,
-        #[serde(default)]
-        version: Option<String>,
-    },
-    Version(String),
-}
-
-impl RuntimeSpec {
-    fn from_raw(raw: RawRuntime) -> Result<Self> {
-        match raw {
-            RawRuntime::Version(v) => Ok(RuntimeSpec::Version(v)),
-            RawRuntime::Inline {
-                path,
-                git,
-                rev,
-                branch,
-                tag,
-                version,
-            } => {
-                let kinds = [
-                    path.is_some().then_some("path"),
-                    git.is_some().then_some("git"),
-                    version.is_some().then_some("version"),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-                if kinds.is_empty() {
-                    bail!("runtime spec must set one of `path`, `git`, or `version`");
-                }
-                if kinds.len() > 1 {
-                    bail!(
-                        "runtime spec sets multiple sources ({}); pick exactly one",
-                        kinds.join(", ")
-                    );
-                }
-                if let Some(p) = path {
-                    Ok(RuntimeSpec::Path(PathBuf::from(p)))
-                } else if let Some(url) = git {
-                    Ok(RuntimeSpec::Git {
-                        url,
-                        rev,
-                        branch,
-                        tag,
-                    })
-                } else {
-                    Ok(RuntimeSpec::Version(version.unwrap()))
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct RawPackage {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    git: Option<String>,
-    #[serde(default)]
-    rev: Option<String>,
-    #[serde(default)]
-    branch: Option<String>,
-    #[serde(default)]
-    tag: Option<String>,
-    #[serde(default)]
-    subdir: Option<String>,
-    #[serde(default)]
-    crate_name: Option<String>,
-}
-
-// -----------------------------------------------------------------------------
-// Validation helpers
-// -----------------------------------------------------------------------------
-
-fn validate_unique_sources(packages: &[PackageEntry]) -> Result<()> {
-    let mut seen: BTreeMap<String, &str> = BTreeMap::new();
-    for p in packages {
-        let key = source_key(&p.source);
-        if let Some(prev) = seen.insert(key.clone(), &p.id) {
-            bail!(
-                "packages '{}' and '{}' both point at the same source ({})",
-                prev,
-                p.id,
-                key
-            );
-        }
-    }
-    Ok(())
-}
-
-fn source_key(s: &PackageSource) -> String {
-    match s {
-        PackageSource::Path(p) => format!("path:{}", p.display()),
-        PackageSource::Git {
-            url,
-            rev,
-            branch,
-            tag,
-            subdir,
-        } => format!(
-            "git:{url}#{}#{}#{}#{}",
-            rev.as_deref().unwrap_or(""),
-            branch.as_deref().unwrap_or(""),
-            tag.as_deref().unwrap_or(""),
-            subdir.as_deref().unwrap_or(""),
-        ),
-    }
-}
-
-fn validate_unique_crate_names(packages: &[PackageEntry]) -> Result<()> {
-    let mut seen: BTreeMap<String, &str> = BTreeMap::new();
-    for p in packages {
-        let name = p.crate_name();
-        if let Some(prev) = seen.insert(name.clone(), &p.id) {
-            bail!(
-                "packages '{}' and '{}' would both produce crate '{}'; set `crate_name` on one to disambiguate",
-                prev,
-                p.id,
-                name
-            );
-        }
-    }
-    Ok(())
-}
-
-/// Convenience for callers that have a directory and want to find the
-/// canonical config file inside it.
-pub fn config_path_in(dir: &Path) -> PathBuf {
-    dir.join(CONFIG_FILE_NAME)
-}
-
-/// Staging directory convention: `<config-dir>/.move-bindgen/<name>/`.
-///
-/// All install artefacts for a given directory live under one
-/// `.move-bindgen/` root, with a per-config subdirectory keyed by the
-/// config's file stem. Examples:
-///
-/// - `configs/exchange.toml` → `configs/.move-bindgen/exchange/`
-/// - `configs/pyth.toml`     → `configs/.move-bindgen/pyth/`
-/// - `./move-bindgen.toml`   → `./.move-bindgen/default/`
-///
-/// The canonical `move-bindgen.toml` filename maps to `default/`
-/// rather than the literal `move-bindgen/` to avoid the awkward
-/// `.move-bindgen/move-bindgen/` doubled name.
-///
-/// One root means one gitignore line (`/.move-bindgen/`) regardless
-/// of how many configs share a directory.
-pub fn staging_dir_for(config_path: &Path) -> PathBuf {
-    let dir = config_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let stem = config_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("default");
-    let subdir = if stem == "move-bindgen" {
-        "default"
-    } else {
-        stem
-    };
-    dir.join(".move-bindgen").join(subdir)
-}
-
-#[cfg(test)]
-mod staging_tests {
-    use super::*;
-
-    #[test]
-    fn staging_dir_basics() {
-        assert_eq!(
-            staging_dir_for(Path::new("configs/exchange.toml")),
-            PathBuf::from("configs/.move-bindgen/exchange"),
-        );
-        assert_eq!(
-            staging_dir_for(Path::new("configs/counter.toml")),
-            PathBuf::from("configs/.move-bindgen/counter"),
-        );
-        assert_eq!(
-            staging_dir_for(Path::new("./move-bindgen.toml")),
-            PathBuf::from("./.move-bindgen/default"),
-        );
-    }
-
-    #[test]
-    fn multiple_configs_in_one_dir_share_a_root() {
-        // Two siblings under the same `.move-bindgen/`. This is the
-        // whole point of the layout — one dotfile to gitignore.
-        let a = staging_dir_for(Path::new("configs/exchange.toml"));
-        let b = staging_dir_for(Path::new("configs/pyth.toml"));
-        assert_eq!(a.parent(), b.parent());
-        assert_eq!(a.parent().unwrap(), Path::new("configs/.move-bindgen"));
-    }
 }
 
 #[cfg(test)]
@@ -961,21 +566,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.runtime, RuntimeSpec::Version("0.1".into()));
-    }
-
-    #[test]
-    fn default_crate_name_kebabs_underscores() {
-        assert_eq!(
-            default_crate_name(&PackageSource::Path(PathBuf::from("oracle_price_feed"))),
-            "oracle-price-feed-rs"
-        );
-        assert_eq!(
-            default_crate_name(&PackageSource::Path(PathBuf::from("Counter"))),
-            "counter-rs"
-        );
-        assert_eq!(
-            default_crate_name(&PackageSource::Path(PathBuf::from("packages/foo"))),
-            "foo-rs"
-        );
     }
 }

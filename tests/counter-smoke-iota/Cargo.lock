@@ -1455,6 +1455,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "move-bindgen-ext-core"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "primitive-types 0.14.0",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "move-bindgen-ext-iota"
 version = "0.1.0"
 dependencies = [
@@ -1463,6 +1473,7 @@ dependencies = [
  "iota-sdk-graphql-client",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
+ "move-bindgen-ext-core",
  "primitive-types 0.14.0",
  "serde",
  "thiserror 2.0.18",
@@ -1477,6 +1488,7 @@ dependencies = [
  "iota-sdk-crypto",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
+ "move-bindgen-ext-core",
  "move-bindgen-ext-iota",
  "move-core-types",
  "primitive-types 0.14.0",

@@ -4,6 +4,7 @@
 /// function, and an event the bindings generator can wire up.
 module counter_sui::counter;
 
+use sui::dynamic_field;
 use sui::event;
 
 /// Maximum amount any single `increment` call can add.
@@ -16,6 +17,20 @@ public struct Bumped has copy, drop {
     counter: ID,
     value: u64,
     by: address,
+}
+
+/// Dynamic-field key fixture: a `u64` slot id under which a [`Note`] is
+/// stored. Has `copy + drop + store` so it can be used as a `Name`.
+public struct NoteKey has copy, drop, store {
+    /// User-chosen slot id.
+    slot: u64,
+}
+
+/// Dynamic-field value fixture: an arbitrary string note attached under
+/// a [`NoteKey`]. Has `store` so it can live in a dynamic field.
+public struct Note has copy, drop, store {
+    /// Free-form content set by [`set_note`].
+    text: vector<u8>,
 }
 
 /// Shared counter object. Stores the current value plus a "target"
@@ -49,6 +64,18 @@ public fun increment(c: &mut Counter, by: u64, ctx: &TxContext) {
         value: c.value,
         by: tx_context::sender(ctx),
     });
+}
+
+/// Attach (or overwrite) a [`Note`] under `slot` on `c`. Stored as a
+/// `sui::dynamic_field` keyed by [`NoteKey`].
+public fun set_note(c: &mut Counter, slot: u64, text: vector<u8>) {
+    let key = NoteKey { slot };
+    if (dynamic_field::exists_<NoteKey>(&c.id, key)) {
+        let n = dynamic_field::borrow_mut<NoteKey, Note>(&mut c.id, key);
+        n.text = text;
+    } else {
+        dynamic_field::add<NoteKey, Note>(&mut c.id, key, Note { text });
+    }
 }
 
 /// Read-only views — useful for dev-inspect codegen.

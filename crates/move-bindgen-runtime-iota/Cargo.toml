@@ -17,6 +17,7 @@ iota-sdk-types.workspace               = true
 iota-sdk-transaction-builder.workspace = true
 iota-sdk-crypto.workspace              = true
 move-bindgen-ext.workspace             = true
+move-bindgen-ext-core.workspace        = true
 
 [lints]
 workspace = true
