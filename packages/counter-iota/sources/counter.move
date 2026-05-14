@@ -136,6 +136,14 @@ public fun owner(c: &Counter): address {
     c.owner
 }
 
+/// Multi-return fixture — exercises codegen's tuple-return path.
+/// Returns `(value, big_value)` so callers can destructure both at
+/// once, and so `InspectResult::decode` can demonstrate decoding a
+/// specific `Argument::NestedResult` slot.
+public fun snapshot(c: &Counter): (u64, u256) {
+    (c.value, c.big_value)
+}
+
 /// Reset `c.value` to zero. Requires the matching [`AdminCap`] — passing
 /// any other capability fails type-checking on chain.
 public fun reset(_cap: &AdminCap, c: &mut Counter) {

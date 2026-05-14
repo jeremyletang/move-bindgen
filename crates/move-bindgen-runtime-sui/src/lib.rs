@@ -45,7 +45,7 @@ pub use arguments::{
 };
 pub use builder::{ExecuteError, InnerBuilder, PtbBuilder};
 pub use cache::{CachedObject, ObjectCache};
-pub use effects::{EffectsExt, EventsError};
+pub use effects::{EffectsDecodeError, EffectsExt, EventsError};
 pub use framework::{make_struct_tag, ID, SUI_FRAMEWORK_ADDRESS, UID};
 pub use signer::{DynSigner, SignError, SignFuture};
 

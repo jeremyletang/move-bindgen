@@ -39,7 +39,7 @@ async fn increment_call_finalizes_into_a_well_formed_ptb() {
     // Counter is shared, AdminCap is owned. Register both before any call.
     let counter_id = fake_object_id(0xC0);
     let admin_id = fake_object_id(0xAD);
-    ptb.register_shared(counter_id, /*initial_v=*/ 1, /*mutable=*/ true);
+    ptb.register_shared(counter_id, /*initial_v=*/ 1);
     ptb.register_owned(admin_id, fake_object_ref(0xAD));
 
     // Build three calls — bare ObjectIds + a Pure u64.
