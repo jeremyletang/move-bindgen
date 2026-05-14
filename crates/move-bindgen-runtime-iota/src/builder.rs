@@ -158,14 +158,15 @@ impl PtbBuilder {
         self.cache.owned.insert(id, r);
     }
 
-    /// Cache `id` as a shared object with the given initial shared version
-    /// and default mutability.
-    pub fn register_shared(&mut self, id: ObjectId, initial_shared_version: u64, mutable: bool) {
+    /// Cache `id` as a shared object with the given initial shared
+    /// version. Mutability is decided per call site (the codegen
+    /// path wraps as `Shared` / `SharedMut`; manual users go through
+    /// [`Self::resolve_object_shared`]).
+    pub fn register_shared(&mut self, id: ObjectId, initial_shared_version: u64) {
         self.cache.shared.insert(
             id,
             SharedObjectInfo {
                 initial_shared_version,
-                mutable,
             },
         );
     }
@@ -181,8 +182,8 @@ impl PtbBuilder {
             FetchedObject::Owned(r) => self.register_owned(id, r),
             FetchedObject::Shared {
                 initial_shared_version,
-                mutable,
-            } => self.register_shared(id, initial_shared_version, mutable),
+                ..
+            } => self.register_shared(id, initial_shared_version),
         }
         Ok(())
     }
@@ -192,26 +193,23 @@ impl PtbBuilder {
     /// Cache miss without fetcher → bare-id input (SDK errors at finish time
     /// if it never gets resolved).
     ///
-    /// For shared objects this uses whatever `mutable` flag was cached
-    /// (or `mutable=true` from the fetcher's default). Codegen-driven
-    /// per-call mutability goes through [`Self::resolve_object_shared`].
+    /// By-value entrypoint — defaults shared objects to `mutable=true`
+    /// (the permissive lock). Codegen-driven `&T` / `&mut T` go
+    /// through [`Self::resolve_object_shared`] for per-call mutability.
     pub async fn resolve_object(&mut self, id: ObjectId) -> Argument {
-        self.resolve_object_inner(id, None).await
+        self.resolve_object_inner(id, true).await
     }
 
     /// Like [`Self::resolve_object`] but pins the shared-input
-    /// mutability for this call only — useful for codegen routing
-    /// `&T` / `&mut T` parameters through `Shared(_)` / `SharedMut(_)`
-    /// regardless of how the object was cached.
+    /// mutability for this call only. Codegen routes
+    /// `into_argument_ref` / `into_argument_mut` on `ObjectId`
+    /// through here so each Move `&T` / `&mut T` parameter gets the
+    /// right on-chain lock independent of how the object was cached.
     pub async fn resolve_object_shared(&mut self, id: ObjectId, mutable: bool) -> Argument {
-        self.resolve_object_inner(id, Some(mutable)).await
+        self.resolve_object_inner(id, mutable).await
     }
 
-    async fn resolve_object_inner(
-        &mut self,
-        id: ObjectId,
-        override_mutable: Option<bool>,
-    ) -> Argument {
+    async fn resolve_object_inner(&mut self, id: ObjectId, shared_mutable: bool) -> Argument {
         if let Some(r) = self.cache.owned.get(&id).cloned() {
             return self.inner.input(Input::ImmutableOrOwned(r));
         }
@@ -219,7 +217,7 @@ impl PtbBuilder {
             return self.inner.input(Input::Shared(SharedObjectReference {
                 object_id: id,
                 initial_shared_version: Version::from_u64(info.initial_shared_version),
-                mutable: override_mutable.unwrap_or(info.mutable),
+                mutable: shared_mutable,
             }));
         }
 
@@ -234,19 +232,18 @@ impl PtbBuilder {
             }
             Some(Ok(FetchedObject::Shared {
                 initial_shared_version,
-                mutable,
+                ..
             })) => {
                 self.cache.shared.insert(
                     id,
                     SharedObjectInfo {
                         initial_shared_version,
-                        mutable,
                     },
                 );
                 self.inner.input(Input::Shared(SharedObjectReference {
                     object_id: id,
                     initial_shared_version: Version::from_u64(initial_shared_version),
-                    mutable: override_mutable.unwrap_or(mutable),
+                    mutable: shared_mutable,
                 }))
             }
             _ => self.inner.apply_argument(id),

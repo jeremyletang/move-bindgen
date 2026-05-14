@@ -1,9 +1,15 @@
-//! Dev-inspect (read-only PTB simulation) of `counter::value` and `counter::owner`.
+//! Dev-inspect (read-only PTB simulation) of `counter::value`,
+//! `counter::owner`, and the multi-return `counter::snapshot`.
 //!
 //! Run with: `cargo run --example inspect -- <sender-address>`.
 //! The sender needs gas coins on testnet for auto-gas to fill the gas slots,
 //! but nothing is signed or submitted — `inspect()` performs a dry-run and
 //! decodes per-command return values out of the dry-run results.
+//!
+//! `snapshot` returns `(u64, u256)`. The generated Rust binding hands
+//! back a tuple `(Argument, Argument)` of `Argument::NestedResult`
+//! handles; `InspectResult::decode(arg)` pulls each slot out
+//! individually with its own Rust type.
 
 use std::str::FromStr;
 
@@ -30,16 +36,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_auto_gas()
         .with_package::<counter_iota_rs::Package>(package_addr);
 
+    // Single-return calls produce one `Argument::Result(_)` each.
     let value_arg = counter::value(&mut ptb, counter_id).await;
     let owner_arg = counter::owner(&mut ptb, counter_id).await;
+    // Multi-return: `snapshot(): (u64, u256)` produces a pair of
+    // `Argument::NestedResult(_, 0)` / `NestedResult(_, 1)` handles.
+    let (snap_value, snap_big) = counter::snapshot(&mut ptb, counter_id).await;
 
     let result = ptb.inspect().await?;
 
     let value: u64 = result.decode(value_arg)?;
     let owner: Address = result.decode(owner_arg)?;
+    // Each nested slot decodes with its own type.
+    let snap_v: u64 = result.decode(snap_value)?;
+    let snap_b: U256 = result.decode(snap_big)?;
 
     println!("counter::value({COUNTER_ID}) = {value}");
     println!("counter::owner({COUNTER_ID}) = {owner}");
+    println!("counter::snapshot({COUNTER_ID}) = (value={snap_v}, big_value={snap_b})");
     println!(
         "dry-run gas used: {} nanos",
         result.effects.gas_summary().gas_used()

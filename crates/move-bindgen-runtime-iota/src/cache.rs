@@ -6,11 +6,15 @@ use std::collections::HashMap;
 
 use crate::{ObjectId, ObjectReference};
 
-/// Cached info for a known shared object.
+/// Cached info for a known shared object. Mutability is *not* stored —
+/// codegen routes `&T` / `&mut T` parameters through `Shared(_)` /
+/// `SharedMut(_)` wrappers at the call site, so the on-chain
+/// shared-input lock comes from the Move signature instead of a
+/// per-cache default. Manual `resolve_object_shared(id, mutable)`
+/// callers still get to pick.
 #[derive(Copy, Clone, Debug)]
 pub struct SharedObjectInfo {
     pub initial_shared_version: u64,
-    pub mutable: bool,
 }
 
 /// Per-`ObjectId` ownership info that [`crate::PtbBuilder`] consults
