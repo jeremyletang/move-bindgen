@@ -48,7 +48,7 @@ pub fn default_output_name_from_dir(dir: &Path) -> String {
 /// `flavour = "..."`.
 pub fn render_starter(output_name: &str, flavour: Flavour) -> String {
     let docs_url = DEFAULT_RUNTIME_GIT_URL.trim_end_matches(".git");
-    let (framework_default, addr_prefix) = match flavour {
+    let (framework_skip_list, addr_prefix) = match flavour {
         Flavour::Iota => ("[\"Iota\", \"MoveStdlib\"]", "iota"),
         Flavour::Sui => ("[\"Sui\", \"MoveStdlib\"]", "sui"),
     };
@@ -60,12 +60,15 @@ pub fn render_starter(output_name: &str, flavour: Flavour) -> String {
 # SDK family the generated code targets.
 flavour = "{flavour_str}"
 
-# Override the default {framework_default} so the framework and Move
-# stdlib generate as peer crates. Without this, codegen errors on any
-# reference to {flavour_title} types beyond the runtime's well-known
-# set (UID, ID, Option, String) — e.g. `{addr_prefix}::coin::Coin`,
-# `{addr_prefix}::linked_table::LinkedTable`. Drop this line if your
-# packages only touch the well-known runtime types.
+# Move packages skipped at codegen time and routed through the
+# runtime's re-exports instead. Empty by default — the runtime only
+# re-exports a handful of types (UID, ID, Option, String), so any
+# reference to richer framework types (e.g. `{addr_prefix}::coin::Coin`,
+# `{addr_prefix}::linked_table::LinkedTable`) needs the framework + stdlib
+# generated as peer crates. If your packages only touch the runtime's
+# well-known types, you can shrink the output with:
+#
+#   framework_packages = {framework_skip_list}
 framework_packages = []
 
 [output]
@@ -88,10 +91,6 @@ runtime = {{ git = "{git_url}" }}
 # subdir = "<sub-path-in-repo>"
 "#,
         flavour_str = flavour.as_str(),
-        flavour_title = match flavour {
-            Flavour::Iota => "Iota",
-            Flavour::Sui => "Sui",
-        },
         git_url = DEFAULT_RUNTIME_GIT_URL,
     )
 }

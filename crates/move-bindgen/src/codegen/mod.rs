@@ -322,9 +322,21 @@ fn render_cargo_toml(
     }
 
     let footer = if as_workspace_member {
-        String::new()
+        // Inherit the workspace's silence-all-lints policy — see
+        // `render_workspace_cargo_toml` in the CLI.
+        "\n[lints]\nworkspace = true\n".to_string()
     } else {
-        "\n# Detach this crate from any parent workspace it might be generated inside.\n\
+        // Standalone crate: bake the lints policy in directly + detach
+        // from any parent workspace it might be generated inside.
+        "\n# Generated code follows codegen rules, not human style — silence\n\
+         # both rustc and clippy noise. Real compile errors still surface.\n\
+         [lints.rust]\n\
+         warnings = \"allow\"\n\
+         \n\
+         [lints.clippy]\n\
+         all = { level = \"allow\", priority = -1 }\n\
+         \n\
+         # Detach this crate from any parent workspace it might be generated inside.\n\
          [workspace]\n"
             .to_string()
     };

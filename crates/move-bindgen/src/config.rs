@@ -31,10 +31,16 @@ use self::runtime::RawRuntime;
 
 const CONFIG_FILE_NAME: &str = "move-bindgen.toml";
 
-/// Default Move package names whose types are already covered by
-/// `move-bindgen-runtime` (`UID`, `ID`, `Option`, `String`, …). Skipped at
-/// codegen time and routed through the runtime re-exports instead.
-pub const DEFAULT_FRAMEWORK_PACKAGES: &[&str] = &["Iota", "MoveStdlib"];
+/// Move package names skipped at codegen time and routed through
+/// `move-bindgen-runtime` re-exports instead.
+///
+/// Empty by default — the runtime only re-exports a handful of types
+/// (`UID`, `ID`, …) and most real Move packages reference framework
+/// types it *doesn't* cover (`Coin`, `Balance`, `Table`, …). Letting
+/// codegen emit the framework crates as peers is what works out of
+/// the box; users who want the smaller output can opt back in via
+/// `framework_packages = ["Iota", "MoveStdlib"]` in `move-bindgen.toml`.
+pub const DEFAULT_FRAMEWORK_PACKAGES: &[&str] = &[];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputFormat {

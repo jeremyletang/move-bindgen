@@ -620,6 +620,15 @@ fn render_workspace_cargo_toml(
     s.push('\n');
     s.push_str("serde = { version = \"1\", features = [\"derive\"] }\n");
     s.push_str("bcs   = \"0.1\"\n");
+    s.push_str(
+        "\n# Generated code follows codegen rules, not human style — silence\n\
+         # both rustc and clippy noise. Real compile errors still surface.\n\
+         [workspace.lints.rust]\n\
+         warnings = \"allow\"\n\
+         \n\
+         [workspace.lints.clippy]\n\
+         all = { level = \"allow\", priority = -1 }\n",
+    );
     s
 }
 
