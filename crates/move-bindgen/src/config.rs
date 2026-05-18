@@ -12,6 +12,7 @@
 
 mod flavour;
 mod package;
+mod publish;
 mod runtime;
 mod staging;
 
@@ -23,10 +24,12 @@ use serde::Deserialize;
 
 pub use self::flavour::Flavour;
 pub use self::package::{default_crate_name, PackageEntry, PackageSource};
+pub use self::publish::{PublishConfig, PublishNetwork};
 pub use self::runtime::{RuntimeSpec, DEFAULT_RUNTIME_GIT_URL};
 pub use self::staging::{config_path_in, staging_dir_for};
 
 use self::package::{validate_unique_crate_names, validate_unique_sources, RawPackage};
+use self::publish::RawPublish;
 use self::runtime::RawRuntime;
 
 const CONFIG_FILE_NAME: &str = "move-bindgen.toml";
@@ -70,6 +73,10 @@ pub struct Config {
     /// All packages we generate bindings for. For `SingleCrate`, exactly
     /// one entry. For `Workspace`, one or more.
     pub packages: Vec<PackageEntry>,
+    /// `[publish]` block. Drives generation of deployable bytecode +
+    /// `Package::deployer(...)` per target network. Empty `networks` =
+    /// silently skip; no deploy API is emitted.
+    pub publish: PublishConfig,
 }
 
 impl Config {
@@ -209,6 +216,8 @@ impl Config {
             bail!("[output].name is required when format = 'workspace'");
         }
 
+        let publish = PublishConfig::from_raw(raw.publish.unwrap_or_default())?;
+
         Ok(Config {
             config_dir,
             flavour: raw.flavour.unwrap_or_default(),
@@ -217,6 +226,7 @@ impl Config {
             runtime,
             framework_packages,
             packages,
+            publish,
         })
     }
 }
@@ -232,6 +242,8 @@ struct RawConfig {
     package: Option<RawPackage>,
     #[serde(default)]
     packages: BTreeMap<String, RawPackage>,
+    #[serde(default)]
+    publish: Option<RawPublish>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -283,6 +295,37 @@ mod tests {
                 .map(|s| s.to_string())
                 .collect()
         );
+        assert!(
+            cfg.publish.networks.is_empty(),
+            "missing [publish] defaults to empty networks (silent skip)"
+        );
+    }
+
+    #[test]
+    fn publish_block_flows_through_config_load() {
+        let cfg = parse(
+            r#"
+            [output]
+            format  = "workspace"
+            name    = "ws"
+            runtime = { path = "../runtime" }
+
+            [packages.foo]
+            path = "packages/foo"
+
+            [publish]
+            networks = [
+                "testnet",
+                "mainnet",
+                { name = "localnet", addresses = { iota = "0x2" } },
+            ]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.publish.networks.len(), 3);
+        assert_eq!(cfg.publish.networks[0].name, "testnet");
+        assert_eq!(cfg.publish.networks[2].name, "localnet");
+        assert_eq!(cfg.publish.networks[2].addresses.len(), 1);
     }
 
     #[test]

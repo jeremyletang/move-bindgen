@@ -24,7 +24,7 @@ pub use clean::{run as clean, CleanOutcome};
 pub use codegen::{generate, GenerateOptions, GeneratedCrate, PeerDep};
 pub use config::{
     config_path_in, staging_dir_for, Config, Flavour, OutputFormat, PackageEntry, PackageSource,
-    RuntimeSpec, DEFAULT_RUNTIME_GIT_URL,
+    PublishConfig, PublishNetwork, RuntimeSpec, DEFAULT_RUNTIME_GIT_URL,
 };
 pub use digest::{file_digest, source_dir_digest};
 pub use docs::DocMap;
