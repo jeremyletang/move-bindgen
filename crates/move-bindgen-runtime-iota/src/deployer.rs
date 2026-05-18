@@ -13,7 +13,8 @@
 
 use iota_sdk_transaction_builder::{assigned, TransactionBuilder};
 use iota_sdk_types::{
-    Address, Digest, MovePackageData, ObjectId, ObjectOut, ObjectReference, TransactionEffects,
+    execution_status::ExecutionStatus, Address, Digest, MovePackageData, ObjectId, ObjectOut,
+    ObjectReference, TransactionEffects,
 };
 
 use crate::{
@@ -218,6 +219,20 @@ impl PackageDeployer {
         let sender = self.sender.ok_or(ExecuteError::NoSender)?;
         let policy = self.policy.unwrap_or(UpgradePolicy::Transfer(sender));
 
+        // Some packages compile to zero root modules (e.g. test-only
+        // helper packages whose sources are all gated behind
+        // `#[test_only]`). The chain rejects empty `Publish` commands
+        // with a generic "empty arguments" error; surface a clearer
+        // one instead.
+        if self.modules.is_empty() {
+            return Err(ExecuteError::Finish(
+                "package has no publishable modules — nothing to deploy. \
+                 (If the package's sources are all #[test_only], it shouldn't \
+                 appear in `[publish] networks`.)"
+                    .into(),
+            ));
+        }
+
         let mut tx = TransactionBuilder::new(sender);
         let pkg_data = self.package_data();
 
@@ -254,9 +269,28 @@ impl PackageDeployer {
             .map_err(ExecuteError::Sign)?;
         let effects = submitter.submit(&built, &[signature]).await?;
 
+        // The submit RPC returns Ok for both successful and *aborted*
+        // transactions — the chain accepts the tx then reports the
+        // outcome via the effects' status. Translate failures into a
+        // typed error before scanning for PackageWrite (which won't be
+        // there on abort).
+        let gas = &effects.as_v1().gas_used;
+        eprintln!(
+            "[deploy/gas] actual on-chain: gas_used = {} nanos, net = {} nanos (after storage rebate)",
+            gas.gas_used(),
+            gas.net_gas_usage(),
+        );
+
+        if let ExecutionStatus::Failure { error, command } = effects.status() {
+            return Err(ExecuteError::OnChain {
+                message: format!("{error:?}"),
+                command: *command,
+            });
+        }
+
         let package_id = scan_package_id(&effects).ok_or_else(|| {
             ExecuteError::Finish(
-                "publish succeeded but effects carry no PackageWrite — \
+                "publish completed but effects carry no PackageWrite — \
                  cannot recover the new package id"
                     .into(),
             )
@@ -301,14 +335,51 @@ impl PackageDeployer {
             tx.gas_price(oracle.reference_gas_price().await?);
         }
         if self.gas_budget.is_none() {
-            // Conservative fallback — publish gas use is hard to
-            // estimate without a dry-run probe, and we don't carry one
-            // here. Callers wanting precision set `.gas_budget(...)`
-            // explicitly.
-            tx.gas_budget(oracle.suggest_gas_budget().await?);
+            // Dry-run-based probe — clone the in-progress builder, set
+            // a high temporary budget so the clone can `.finish()`, ask
+            // the oracle for actual gas usage, then set the real budget
+            // to `used + 20%`. Falls back to the oracle's conservative
+            // suggest if the dry-run itself fails (e.g. on networks
+            // that don't expose dry-run).
+            let budget = match dry_run_budget(tx, oracle).await {
+                Ok((estimate, budget)) => {
+                    eprintln!(
+                        "[deploy/gas] dry-run estimated {estimate} nanos → budget {budget} (+20% margin)",
+                    );
+                    budget
+                }
+                Err(e) => {
+                    let fallback = oracle.suggest_gas_budget().await?;
+                    eprintln!(
+                        "[deploy/gas] dry-run estimate failed ({e}); falling back to oracle suggest = {fallback} nanos",
+                    );
+                    fallback
+                }
+            };
+            tx.gas_budget(budget);
         }
         Ok(())
     }
+}
+
+/// Clone the in-progress builder, set a generous sim budget so the
+/// clone can `.finish()`, dry-run, return `(gas_used, gas_used + 20%)`.
+/// Mirrors [`crate::PtbBuilder`]'s probe.
+async fn dry_run_budget(
+    tx: &TransactionBuilder,
+    oracle: &(dyn GasOracle + '_),
+) -> Result<(u64, u64), crate::OracleError> {
+    // 1 IOTA in nanos — generous; with `skip_checks` the network won't
+    // reject this regardless of the actual cost.
+    const SIM_BUDGET: u64 = 1_000_000_000;
+    let mut draft = tx.clone();
+    draft.gas_budget(SIM_BUDGET);
+    let built = draft
+        .finish()
+        .map_err(|e| crate::OracleError::Backend(format!("draft finish: {e}")))?;
+    let gas_used = oracle.dry_run_estimate(&built).await?;
+    let budget = gas_used.saturating_add(gas_used / 5).min(SIM_BUDGET);
+    Ok((gas_used, budget))
 }
 
 /// Walk `effects.changed_objects` for the lone `PackageWrite` entry and

@@ -459,6 +459,11 @@ pub enum ExecuteError {
     Sign(#[from] SignError),
     #[error("submitting the transaction: {0}")]
     Submit(#[from] SubmitError),
+    #[error("transaction failed on-chain: {message} (command {command:?})")]
+    OnChain {
+        message: String,
+        command: Option<u64>,
+    },
 }
 
 impl ExecuteError {

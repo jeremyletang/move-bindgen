@@ -37,6 +37,9 @@ mod move_deps;
 mod staging_layout;
 mod worklist;
 
+pub use self::staging_layout::is_canonical_framework;
+pub(crate) use self::move_deps::read_addresses_block;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
@@ -46,8 +49,7 @@ use self::addresses::build_address_overrides;
 use self::manifest_rewrite::rewrite_staged_manifest;
 use self::move_deps::{dep_source_from_kind, read_move_deps, read_move_package_name};
 use self::staging_layout::{
-    copy_dir_recursive, is_canonical_framework, source_basename, source_key, unique_basename,
-    unique_basename_against,
+    copy_dir_recursive, source_basename, source_key, unique_basename, unique_basename_against,
 };
 use self::worklist::WorkItem;
 use crate::config::{default_crate_name, Config, PackageSource};

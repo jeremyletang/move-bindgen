@@ -86,7 +86,7 @@ pub(super) fn parse_dep_table(alias: &str, dep_table: &toml::value::Table) -> Re
     bail!("dependency '{}' has neither `local` nor `git`", alias)
 }
 
-pub(super) fn read_addresses_block(move_toml: &Path) -> Result<BTreeMap<String, String>> {
+pub(crate) fn read_addresses_block(move_toml: &Path) -> Result<BTreeMap<String, String>> {
     let text = std::fs::read_to_string(move_toml)
         .with_context(|| format!("reading {}", move_toml.display()))?;
     let v: toml::Value =

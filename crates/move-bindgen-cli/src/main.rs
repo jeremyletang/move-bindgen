@@ -425,7 +425,6 @@ fn generate_single_from_staging(
         &pkg_path,
         &make_build_opts(overrides, reporter, manifest.flavour),
         &cfg.publish.networks,
-        Some(&pkg.move_name.to_lowercase()),
         Some(reporter),
     )?;
     let out_name = cfg
@@ -473,16 +472,18 @@ fn generate_workspace_from_staging(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| cfg.config_dir.join(&workspace_name));
 
-    // Set of explicit-package ids (`[packages.<id>]` in the config).
-    // Only these get publish bytes — transitively-discovered deps are
-    // dependencies of the user's package, not things the user wants to
-    // republish themselves.
-    let explicit_ids: std::collections::BTreeSet<&str> =
-        cfg.packages.iter().map(|p| p.id.as_str()).collect();
-
     // Load every staged package and build the peer map keyed by
-    // address. Framework-marked entries are skipped: the runtime owns
-    // their types and ty.rs's well-known mappings handle the routing.
+    // address. Codegen-framework-marked entries are skipped: the
+    // runtime owns their types and ty.rs's well-known mappings handle
+    // the routing.
+    //
+    // Publish-bytes are emitted for every non-canonical-framework
+    // package — that includes transitively-discovered user packages
+    // like the dex repo's `funding` / `fixed18` / `PriceFeed`. The
+    // *canonical* framework list (`Iota` / `MoveStdlib` / `Sui` / …)
+    // is what's already on-chain and not republishable — distinct
+    // from the user-controlled `framework_packages` config which only
+    // affects codegen routing.
     let mut loaded = Vec::with_capacity(manifest.packages.len());
     let mut peers = PeerMap::new();
     for pkg in &manifest.packages {
@@ -491,20 +492,15 @@ fn generate_workspace_from_staging(
         }
         let pkg_path = staging_root.join(&pkg.staged_path);
         reporter.stage("Compiling", &pkg.move_name);
-        let (networks, addr_name): (&[move_bindgen::PublishNetwork], _) =
-            if explicit_ids.contains(pkg.id.as_str()) {
-                (
-                    cfg.publish.networks.as_slice(),
-                    Some(pkg.move_name.to_lowercase()),
-                )
-            } else {
-                (&[], None)
-            };
+        let publish_networks = if move_bindgen::is_canonical_framework(&pkg.move_name) {
+            &[][..]
+        } else {
+            cfg.publish.networks.as_slice()
+        };
         let bindings = move_bindgen::load_package_for_publish(
             &pkg_path,
             &make_build_opts(overrides, reporter, manifest.flavour),
-            networks,
-            addr_name.as_deref(),
+            publish_networks,
             Some(reporter),
         )?;
         let addr = bindings_address(&bindings);
