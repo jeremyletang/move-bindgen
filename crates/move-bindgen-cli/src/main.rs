@@ -421,9 +421,12 @@ fn generate_single_from_staging(
         .ok_or_else(|| anyhow::anyhow!("staging manifest has no packages"))?;
     let pkg_path = staging_root.join(&pkg.staged_path);
     reporter.stage("Compiling", &pkg.move_name);
-    let bindings = move_bindgen::load_package_with_options(
+    let bindings = move_bindgen::load_package_for_publish(
         &pkg_path,
         &make_build_opts(overrides, reporter, manifest.flavour),
+        &cfg.publish.networks,
+        Some(&pkg.move_name.to_lowercase()),
+        Some(reporter),
     )?;
     let out_name = cfg
         .output_name
@@ -470,6 +473,13 @@ fn generate_workspace_from_staging(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| cfg.config_dir.join(&workspace_name));
 
+    // Set of explicit-package ids (`[packages.<id>]` in the config).
+    // Only these get publish bytes — transitively-discovered deps are
+    // dependencies of the user's package, not things the user wants to
+    // republish themselves.
+    let explicit_ids: std::collections::BTreeSet<&str> =
+        cfg.packages.iter().map(|p| p.id.as_str()).collect();
+
     // Load every staged package and build the peer map keyed by
     // address. Framework-marked entries are skipped: the runtime owns
     // their types and ty.rs's well-known mappings handle the routing.
@@ -481,9 +491,21 @@ fn generate_workspace_from_staging(
         }
         let pkg_path = staging_root.join(&pkg.staged_path);
         reporter.stage("Compiling", &pkg.move_name);
-        let bindings = move_bindgen::load_package_with_options(
+        let (networks, addr_name): (&[move_bindgen::PublishNetwork], _) =
+            if explicit_ids.contains(pkg.id.as_str()) {
+                (
+                    cfg.publish.networks.as_slice(),
+                    Some(pkg.move_name.to_lowercase()),
+                )
+            } else {
+                (&[], None)
+            };
+        let bindings = move_bindgen::load_package_for_publish(
             &pkg_path,
             &make_build_opts(overrides, reporter, manifest.flavour),
+            networks,
+            addr_name.as_deref(),
+            Some(reporter),
         )?;
         let addr = bindings_address(&bindings);
         match peers.insert(addr, pkg.crate_name.clone()) {
@@ -787,7 +809,13 @@ fn write_crate(out_dir: &std::path::Path, c: &move_bindgen::GeneratedCrate) -> a
     std::fs::write(out_dir.join("Cargo.toml"), &c.cargo_toml)?;
     std::fs::write(src_dir.join("lib.rs"), &c.lib_rs)?;
     for (name, body) in &c.module_files {
-        std::fs::write(src_dir.join(name), body)?;
+        let path = src_dir.join(name);
+        // `name` may be a nested path (e.g. `bytecode/testnet.rs`) —
+        // ensure the parent directory exists before writing.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, body)?;
     }
     Ok(())
 }

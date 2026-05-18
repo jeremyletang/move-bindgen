@@ -22,6 +22,25 @@ use crate::config::Flavour;
 mod iota;
 mod sui;
 
+/// Per-network publishable artifact. Produced by [`build_publish`] —
+/// modules sorted in dependency order with the package's own address
+/// pinned to `0x0`, plus the transitive deps' on-chain addresses for
+/// the target network. This is exactly what a publish PTB needs.
+#[derive(Debug, Clone)]
+pub(crate) struct PublishArtifact {
+    /// Network name (matches `PublishNetwork::name`). Used as the
+    /// codegen filename and enum-variant key.
+    pub network: String,
+    /// Serialized module bytecode, topologically sorted. Empty if the
+    /// build produced no root modules (shouldn't happen in practice).
+    pub modules: Vec<Vec<u8>>,
+    /// Transitive dependency package addresses for this network.
+    pub dependencies: Vec<AccountAddress>,
+    /// 32-byte digest the publisher reports to the chain for this
+    /// build artifact.
+    pub digest: [u8; 32],
+}
+
 /// Per-module: constant-pool index → source-level constant name.
 ///
 /// Bytecode `module.constants` carries only `(type, BCS-data)` — names
@@ -102,6 +121,24 @@ pub(crate) fn build_package(path: &Path, opts: &BuildOptions) -> Result<BuiltPac
     match opts.flavour {
         Flavour::Iota => iota::build(path, opts),
         Flavour::Sui => sui::build(path, opts),
+    }
+}
+
+/// Run a publish-style Move build and extract the bytes a publish PTB
+/// needs. The caller is responsible for setting up `opts` so the
+/// package's own named address resolves to `AccountAddress::ZERO`
+/// (otherwise the resulting modules carry the wrong package id).
+///
+/// `network` is recorded on the returned [`PublishArtifact`] so codegen
+/// can route it to the right `bytecode/<name>.rs` file.
+pub(crate) fn build_publish(
+    path: &Path,
+    opts: &BuildOptions,
+    network: &str,
+) -> Result<PublishArtifact> {
+    match opts.flavour {
+        Flavour::Iota => iota::build_publish(path, opts, network),
+        Flavour::Sui => sui::build_publish(path, opts, network),
     }
 }
 

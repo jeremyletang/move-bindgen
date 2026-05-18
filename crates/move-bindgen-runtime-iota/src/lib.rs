@@ -40,6 +40,7 @@ pub use primitive_types::U256;
 pub mod arguments;
 pub mod builder;
 pub mod cache;
+pub mod deployer;
 pub mod effects;
 pub mod framework;
 pub mod signer;
@@ -50,6 +51,7 @@ pub use arguments::{
 };
 pub use builder::{ExecuteError, PtbBuilder};
 pub use cache::{ObjectCache, SharedObjectInfo};
+pub use deployer::{DeployResult, PackageDeployer, UpgradePolicy};
 pub use effects::{EffectsDecodeError, EffectsExt, EventsError};
-pub use framework::{make_struct_tag, ID, UID};
+pub use framework::{make_struct_tag, ID, IOTA_FRAMEWORK_ADDRESS, UID};
 pub use signer::{DynSigner, SignError, SignFuture};

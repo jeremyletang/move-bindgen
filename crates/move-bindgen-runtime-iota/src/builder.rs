@@ -433,9 +433,12 @@ impl PackageAddrs for PtbBuilder {
     }
 }
 
-/// Errors from [`PtbBuilder::execute`] / [`PtbBuilder::inspect`].
+/// Errors from [`PtbBuilder::execute`] / [`PtbBuilder::inspect`] /
+/// [`crate::PackageDeployer::execute`].
 #[derive(Debug, thiserror::Error)]
 pub enum ExecuteError {
+    #[error("no sender configured — call `.sender(addr)` before `.execute()`")]
+    NoSender,
     #[error("no submitter configured — call `.with_submitter(...)` or `.with_client(...)`")]
     NoSubmitter,
     #[error("no signer configured — call `.with_signer(...)` or use `execute_with(&signer)`")]

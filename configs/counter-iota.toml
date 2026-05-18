@@ -11,3 +11,9 @@ runtime = { path = "../crates/move-bindgen-runtime-iota" }
 
 [package]
 path = "../packages/counter-iota"
+
+# Generate publish-bytes for testnet + mainnet so
+# `Package::deployer(Network::Testnet)` / `Package::deployer(Network::Mainnet)`
+# work out of the box.
+[publish]
+networks = ["testnet", "mainnet"]

@@ -20,7 +20,8 @@ pub struct UID {
     pub id: ID,
 }
 
-const IOTA_FRAMEWORK_ADDRESS: Address = {
+/// Canonical address for the `iota` framework package (`0x2`).
+pub const IOTA_FRAMEWORK_ADDRESS: Address = {
     let mut bytes = [0u8; 32];
     bytes[31] = 0x02;
     Address::new(bytes)

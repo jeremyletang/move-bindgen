@@ -4,39 +4,16 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use iota_move_build::{BuildConfig as IotaBuildConfig, IotaPackageHooks};
+use iota_move_build::{BuildConfig as IotaBuildConfig, CompiledPackage, IotaPackageHooks};
 use iota_package_management::system_package_versions::latest_system_packages;
 use move_bytecode_source_map::source_map::SourceMap;
 use move_core_types::account_address::AccountAddress;
 use move_package::BuildConfig as MoveBuildConfig;
 
-use super::{with_captured_stderr, BuildOptions, BuiltPackage, ConstantNames};
+use super::{with_captured_stderr, BuildOptions, BuiltPackage, ConstantNames, PublishArtifact};
 
 pub(super) fn build(path: &Path, opts: &BuildOptions) -> Result<BuiltPackage> {
-    move_package::package_hooks::register_package_hooks(Box::new(IotaPackageHooks));
-
-    let config = MoveBuildConfig {
-        dev_mode: opts.dev_mode,
-        additional_named_addresses: opts.additional_named_addresses.clone(),
-        implicit_dependencies: iota_move_build::implicit_deps(latest_system_packages()),
-        silence_warnings: opts.silence_warnings,
-        ..Default::default()
-    };
-
-    let cfg = IotaBuildConfig {
-        config,
-        run_bytecode_verifier: opts.run_bytecode_verifier,
-        print_diags_to_stderr: opts.print_diags_to_stderr,
-        chain_id: opts.chain_id.clone(),
-    };
-
-    let build = || cfg.build(path).map_err(anyhow::Error::from);
-    let pkg = if opts.print_diags_to_stderr {
-        build()
-    } else {
-        with_captured_stderr(build)
-    };
-    let pkg = pkg.with_context(|| format!("failed to build Move package at {}", path.display()))?;
+    let pkg = compile(path, opts)?;
 
     let name = pkg
         .package
@@ -69,6 +46,69 @@ pub(super) fn build(path: &Path, opts: &BuildOptions) -> Result<BuiltPackage> {
         published_at,
         modules,
     })
+}
+
+/// Publish-flavoured build. Compiles with `opts` (caller is responsible
+/// for setting up `additional_named_addresses` so the package's own
+/// name resolves to `AccountAddress::ZERO`), then extracts the byte
+/// stream + dep set the publish PTB needs.
+pub(super) fn build_publish(
+    path: &Path,
+    opts: &BuildOptions,
+    network: &str,
+) -> Result<PublishArtifact> {
+    let pkg = compile(path, opts)?;
+
+    // `with_unpublished_deps = false` is the standard publish path:
+    // assume every transitive dep is already on-chain and reference it
+    // by `dependency_storage_package_ids`. Modules in the result carry
+    // the package's address from compile time — which the caller pinned
+    // to 0x0 — so the chain can substitute the freshly-minted package
+    // id at publish time.
+    let modules = pkg.get_package_bytes(false);
+    let dependencies = pkg
+        .get_dependency_storage_package_ids()
+        .into_iter()
+        .map(|id| AccountAddress::new(id.into_bytes()))
+        .collect();
+    let digest = pkg.get_package_digest(false);
+
+    Ok(PublishArtifact {
+        network: network.to_string(),
+        modules,
+        dependencies,
+        digest,
+    })
+}
+
+/// Shared compile path used by both [`build`] and [`build_publish`].
+/// Registers the IOTA package hooks and forwards options to
+/// `iota-move-build`.
+fn compile(path: &Path, opts: &BuildOptions) -> Result<CompiledPackage> {
+    move_package::package_hooks::register_package_hooks(Box::new(IotaPackageHooks));
+
+    let config = MoveBuildConfig {
+        dev_mode: opts.dev_mode,
+        additional_named_addresses: opts.additional_named_addresses.clone(),
+        implicit_dependencies: iota_move_build::implicit_deps(latest_system_packages()),
+        silence_warnings: opts.silence_warnings,
+        ..Default::default()
+    };
+
+    let cfg = IotaBuildConfig {
+        config,
+        run_bytecode_verifier: opts.run_bytecode_verifier,
+        print_diags_to_stderr: opts.print_diags_to_stderr,
+        chain_id: opts.chain_id.clone(),
+    };
+
+    let run = || cfg.build(path).map_err(anyhow::Error::from);
+    let pkg = if opts.print_diags_to_stderr {
+        run()
+    } else {
+        with_captured_stderr(run)
+    };
+    pkg.with_context(|| format!("failed to build Move package at {}", path.display()))
 }
 
 fn constant_names_from_iota_source_map(sm: &SourceMap, num_constants: usize) -> ConstantNames {
