@@ -70,6 +70,7 @@ pub(super) fn build_publish(
         modules: Vec::new(),
         dependencies: Vec::new(),
         digest: [0u8; 32],
+        dep_labels: Vec::new(),
     })
 }
 

@@ -34,11 +34,22 @@ pub(crate) struct PublishArtifact {
     /// Serialized module bytecode, topologically sorted. Empty if the
     /// build produced no root modules (shouldn't happen in practice).
     pub modules: Vec<Vec<u8>>,
-    /// Transitive dependency package addresses for this network.
+    /// Transitive dependency package addresses for this network. Some
+    /// of these may be workspace-synthetic (when the dep is another
+    /// user package compiled in the same workspace) — those need
+    /// patching to the real on-chain address before publish.
     pub dependencies: Vec<AccountAddress>,
     /// 32-byte digest the publisher reports to the chain for this
-    /// build artifact.
+    /// build artifact. Stale after dep-address patching; recomputed
+    /// by the runtime if `PackageDeployer::resolve_dep` is used.
     pub digest: [u8; 32],
+    /// Synthetic-dep label table: `(synthetic_address,
+    /// move_package_name)` pairs for entries in `dependencies` that
+    /// resolved to a workspace-internal synthetic (not an on-chain
+    /// framework address). Lets the runtime + user code resolve
+    /// these to real package ids via
+    /// `PackageDeployer::resolve_dep(name, real_addr)`.
+    pub dep_labels: Vec<(AccountAddress, String)>,
 }
 
 /// Per-module: constant-pool index → source-level constant name.

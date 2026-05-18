@@ -52,6 +52,11 @@ pub struct NetworkArtifact {
     pub modules: Vec<Vec<u8>>,
     pub dependencies: Vec<AccountAddress>,
     pub digest: [u8; 32],
+    /// `(synthetic_address, move_name)` for each entry in
+    /// `dependencies` that resolved to a workspace-internal synthetic.
+    /// Empty when the package depends only on canonical-framework
+    /// addresses. Drives `Package::deployer(...).resolve_dep(name, …)`.
+    pub dep_labels: Vec<(AccountAddress, String)>,
 }
 
 /// Build `path` and produce the IR.
@@ -125,6 +130,7 @@ pub fn load_package_for_publish(
             modules: artifact.modules,
             dependencies: artifact.dependencies,
             digest: artifact.digest,
+            dep_labels: artifact.dep_labels,
         });
     }
 

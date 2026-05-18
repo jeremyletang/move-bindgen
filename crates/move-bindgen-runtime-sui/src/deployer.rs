@@ -49,6 +49,8 @@ pub struct PackageDeployer {
     dependencies: &'static [Address],
     #[allow(dead_code)]
     digest: [u8; 32],
+    #[allow(dead_code)]
+    dep_labels: &'static [(Address, &'static str)],
     sender: Option<Address>,
     auto_gas: bool,
     gas_objects: Vec<ObjectReference>,
@@ -62,11 +64,13 @@ impl PackageDeployer {
         modules: &'static [&'static [u8]],
         dependencies: &'static [Address],
         digest: [u8; 32],
+        dep_labels: &'static [(Address, &'static str)],
     ) -> Self {
         Self {
             modules,
             dependencies,
             digest,
+            dep_labels,
             sender: None,
             auto_gas: false,
             gas_objects: Vec::new(),
@@ -74,6 +78,21 @@ impl PackageDeployer {
             gas_budget: None,
             policy: None,
         }
+    }
+
+    pub fn dep_labels(&self) -> &'static [(Address, &'static str)] {
+        self.dep_labels
+    }
+
+    /// Source-level parity with the IOTA side. No-op in the Sui stub
+    /// since `execute()` panics anyway.
+    pub fn resolve_dep(self, _name: impl Into<String>, _real_address: Address) -> Self {
+        self
+    }
+
+    /// Source-level parity with the IOTA side. No-op in the Sui stub.
+    pub fn resolve_from(self, _resolved: &std::collections::HashMap<&'static str, Address>) -> Self {
+        self
     }
 
     pub fn sender(mut self, addr: Address) -> Self {

@@ -11,11 +11,15 @@
 //! fetch needed for it. The `UpgradeCap` object is handled per the
 //! configured [`UpgradePolicy`] (default: transfer to sender).
 
+use std::collections::HashMap;
+
 use iota_sdk_transaction_builder::{assigned, TransactionBuilder};
 use iota_sdk_types::{
-    execution_status::ExecutionStatus, Address, Digest, MovePackageData, ObjectId, ObjectOut,
+    execution_status::ExecutionStatus, Address, MovePackageData, ObjectId, ObjectOut,
     ObjectReference, TransactionEffects,
 };
+use move_binary_format::CompiledModule;
+use move_core_types::account_address::AccountAddress;
 
 use crate::{
     DryRunner, DynSigner, ExecuteError, GasOracle, ObjectCache, Submitter, IOTA_FRAMEWORK_ADDRESS,
@@ -58,6 +62,13 @@ pub struct PackageDeployer {
     modules: &'static [&'static [u8]],
     dependencies: &'static [Address],
     digest: [u8; 32],
+    /// `(synthetic_address, move_name)` pairs for workspace-internal
+    /// deps. The user supplies real addresses via [`Self::resolve_dep`],
+    /// looked up by name; `execute` then patches every module's
+    /// `address_identifiers` pool and the dependency list before
+    /// publish.
+    dep_labels: &'static [(Address, &'static str)],
+    dep_overrides: HashMap<String, Address>,
     sender: Option<Address>,
     submitter: Option<Box<dyn Submitter>>,
     signer: Option<Box<dyn DynSigner>>,
@@ -78,11 +89,14 @@ impl PackageDeployer {
         modules: &'static [&'static [u8]],
         dependencies: &'static [Address],
         digest: [u8; 32],
+        dep_labels: &'static [(Address, &'static str)],
     ) -> Self {
         Self {
             modules,
             dependencies,
             digest,
+            dep_labels,
+            dep_overrides: HashMap::new(),
             sender: None,
             submitter: None,
             signer: None,
@@ -94,6 +108,57 @@ impl PackageDeployer {
             gas_budget: None,
             policy: None,
         }
+    }
+
+    /// Read-only view of `(synthetic_address, move_name)` pairs for
+    /// every workspace-internal dep this package's bytecode references.
+    /// Useful for auto-resolving — iterate, look each name up in your
+    /// deployed-package map, and call [`Self::resolve_dep`] per match.
+    pub fn dep_labels(&self) -> &'static [(Address, &'static str)] {
+        self.dep_labels
+    }
+
+    /// Supply the real on-chain address for a workspace-internal
+    /// dependency. `name` matches one of the entries in the
+    /// `DEP_LABELS` static emitted into `bytecode/<network>.rs` — most
+    /// commonly the lowercased / snake-cased Move package name (e.g.
+    /// `"fixed18"`, `"ring_buffer"`).
+    ///
+    /// At [`Self::execute`] time every module's `address_identifiers`
+    /// pool has the synthetic address swapped for the real one, the
+    /// dependency list is updated, and the digest recomputed before
+    /// publish. Unresolved synthetic deps will cause a
+    /// `PublishUpgradeMissingDependency` on the chain side — surface
+    /// them by inspecting `bytecode::<network>::DEP_LABELS`.
+    pub fn resolve_dep(mut self, name: impl Into<String>, real_address: Address) -> Self {
+        self.dep_overrides.insert(name.into(), real_address);
+        self
+    }
+
+    /// Bulk variant of [`Self::resolve_dep`]: for every entry in this
+    /// deployer's `DEP_LABELS`, look the name up in `resolved` and
+    /// apply [`Self::resolve_dep`] if found. Entries not in the map
+    /// are left unresolved (and will fail publish with a clear error).
+    ///
+    /// Standard usage in a multi-package deploy loop:
+    ///
+    /// ```ignore
+    /// let mut on_chain: HashMap<&'static str, Address> = HashMap::new();
+    /// // After each successful publish:
+    /// on_chain.insert(my_crate::Package::ADDRESS_NAME, result.package_id);
+    /// // Subsequent deployers pick up everything already deployed:
+    /// next_crate::Package::deployer(net)
+    ///     .resolve_from(&on_chain)
+    ///     .sender(sender)
+    ///     // ...
+    /// ```
+    pub fn resolve_from(mut self, resolved: &HashMap<&'static str, Address>) -> Self {
+        for (_synth, name) in self.dep_labels {
+            if let Some(addr) = resolved.get(name) {
+                self.dep_overrides.insert(name.to_string(), *addr);
+            }
+        }
+        self
     }
 
     /// Set the transaction sender. Required — every PTB has a sender
@@ -175,26 +240,123 @@ impl PackageDeployer {
         self
     }
 
-    /// Build the precomputed [`MovePackageData`] BCS view from the
-    /// embedded slices. Cheap — modules are copied into Vec<Vec<u8>>
-    /// once, deps copy 32-byte addresses.
-    fn package_data(&self) -> MovePackageData {
-        let modules = self.modules.iter().map(|m| m.to_vec()).collect();
-        let dependencies = self
+    /// Build the [`MovePackageData`] payload, applying any dep
+    /// overrides supplied via [`Self::resolve_dep`]. Pure path (no
+    /// overrides): copies the embedded slices verbatim and uses the
+    /// codegen-time digest. Patched path: deserializes each module,
+    /// rewrites the `address_identifiers` pool, re-serializes, then
+    /// lets [`MovePackageData::new`] recompute the digest.
+    fn package_data(&self) -> Result<MovePackageData, ExecuteError> {
+        // Build synth→real for the active overrides only. Synthetics
+        // the user didn't resolve are left as-is — the chain will
+        // reject the publish with a clear `MissingDependency`.
+        let mut subs: HashMap<AccountAddress, AccountAddress> = HashMap::new();
+        let mut requested_but_unknown: Vec<&str> = Vec::new();
+        for (name, real) in &self.dep_overrides {
+            let synth = self.dep_labels.iter().find_map(|(s, n)| {
+                (*n == name.as_str()).then_some(*s)
+            });
+            match synth {
+                Some(s) => {
+                    subs.insert(addr_to_core(s), addr_to_core(*real));
+                }
+                None => requested_but_unknown.push(name.as_str()),
+            }
+        }
+        if !requested_but_unknown.is_empty() {
+            eprintln!(
+                "[deploy/patch] warning: resolve_dep({:?}) does not match any \
+                 entry in DEP_LABELS — available names: {:?}",
+                requested_but_unknown,
+                self.dep_labels
+                    .iter()
+                    .map(|(_, n)| *n)
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        if subs.is_empty() {
+            eprintln!(
+                "[deploy/patch] no overrides active — using codegen-time bytes verbatim ({} dep_labels available)",
+                self.dep_labels.len(),
+            );
+            // Fast path: no patching needed, reuse precomputed digest.
+            let modules = self.modules.iter().map(|m| m.to_vec()).collect();
+            let dependencies = self
+                .dependencies
+                .iter()
+                .map(|a| ObjectId::from(*a))
+                .collect();
+            let digest = iota_sdk_types::Digest::from_bytes(self.digest)
+                .expect("32-byte digest is the only shape `from_bytes` accepts here");
+            return Ok(MovePackageData {
+                modules,
+                dependencies,
+                digest,
+            });
+        }
+
+        eprintln!(
+            "[deploy/patch] applying {} dep substitution(s): {:?}",
+            subs.len(),
+            self.dep_overrides
+                .iter()
+                .filter(|(n, _)| self.dep_labels.iter().any(|(_, dn)| dn == n))
+                .map(|(n, a)| format!("{n} → {a}"))
+                .collect::<Vec<_>>()
+        );
+
+        // Patched path. Walk each module, rewrite its address_identifiers
+        // pool, then re-serialize. The chain re-derives module ids from
+        // the same pool, so this is the canonical substitution point.
+        let mut total_slots_patched = 0;
+        let mut unresolved_addrs = std::collections::BTreeSet::new();
+        let mut modules = Vec::with_capacity(self.modules.len());
+        for (i, bytes) in self.modules.iter().enumerate() {
+            let mut m = CompiledModule::deserialize_with_defaults(bytes).map_err(|e| {
+                ExecuteError::Finish(format!("deserializing module #{i} for patching: {e:?}"))
+            })?;
+            for slot in m.address_identifiers.iter_mut() {
+                if let Some(real) = subs.get(&*slot) {
+                    *slot = *real;
+                    total_slots_patched += 1;
+                } else if *slot != AccountAddress::ZERO {
+                    // Non-zero, non-substituted — a real on-chain
+                    // address (e.g., framework 0x1/0x2) OR an
+                    // unresolved synthetic that'll trip the chain.
+                    unresolved_addrs.insert(*slot);
+                }
+            }
+            let mut out = Vec::with_capacity(bytes.len());
+            m.serialize_with_version(m.version, &mut out).map_err(|e| {
+                ExecuteError::Finish(format!("re-serializing patched module #{i}: {e:?}"))
+            })?;
+            modules.push(out);
+        }
+        eprintln!(
+            "[deploy/patch] patched {total_slots_patched} address-identifier slot(s) across {} module(s); {} other non-zero address(es) left as-is: {:?}",
+            modules.len(),
+            unresolved_addrs.len(),
+            unresolved_addrs
+                .iter()
+                .map(|a| format!("{a}"))
+                .collect::<Vec<_>>(),
+        );
+
+        let dependencies: Vec<ObjectId> = self
             .dependencies
             .iter()
-            .map(|a| ObjectId::from(*a))
+            .map(|a| {
+                let core = addr_to_core(*a);
+                let mapped = subs.get(&core).copied().unwrap_or(core);
+                ObjectId::from(core_to_addr(mapped))
+            })
             .collect();
-        // Codegen captures the digest from the build; reuse it instead
-        // of re-hashing here (avoids a feature requirement on
-        // iota-sdk-types' `hash`).
-        let digest = Digest::from_bytes(self.digest)
-            .expect("32-byte digest is the only shape `from_bytes` accepts here");
-        MovePackageData {
-            modules,
-            dependencies,
-            digest,
-        }
+
+        // `MovePackageData::new` recomputes the digest over the new
+        // (modules, deps) — required for the chain to accept the
+        // patched package.
+        Ok(MovePackageData::new(modules, dependencies))
     }
 
     /// Sign + submit the publish transaction. Returns the new package
@@ -234,7 +396,7 @@ impl PackageDeployer {
         }
 
         let mut tx = TransactionBuilder::new(sender);
-        let pkg_data = self.package_data();
+        let pkg_data = self.package_data()?;
 
         // `publish(...)` returns a builder in `Publish` state; assign
         // names the result so we can refer to the UpgradeCap by the
@@ -392,4 +554,18 @@ fn scan_package_id(effects: &TransactionEffects) -> Option<Address> {
         }
     }
     None
+}
+
+/// `iota_sdk_types::Address` (32-byte newtype) and
+/// `move_core_types::AccountAddress` (same 32 bytes, different type
+/// identity) are wire-compatible. These helpers bridge them so the
+/// bytecode-patching code can speak `AccountAddress` (what
+/// `move-binary-format` exposes) without leaking that into the public
+/// API.
+fn addr_to_core(a: Address) -> AccountAddress {
+    AccountAddress::new(a.into_bytes())
+}
+
+fn core_to_addr(a: AccountAddress) -> Address {
+    Address::new(a.into_bytes())
 }

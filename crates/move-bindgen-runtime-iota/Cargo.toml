@@ -13,11 +13,17 @@ bcs.workspace                          = true
 thiserror.workspace                    = true
 primitive-types.workspace              = true
 move-core-types.workspace              = true
-iota-sdk-types.workspace               = true
+# `hash` enables `MovePackageData::new` (blake2) which we use to
+# recompute the digest after patching dep addresses in modules.
+iota-sdk-types                         = { workspace = true, features = ["serde", "hash"] }
 iota-sdk-transaction-builder.workspace = true
 iota-sdk-crypto.workspace              = true
 move-bindgen-ext.workspace             = true
 move-bindgen-ext-core.workspace        = true
+# Used by `PackageDeployer::resolve_dep` to walk a module's
+# `address_identifiers` pool and substitute synthetic workspace
+# addresses with real on-chain package ids before publish.
+move-binary-format.workspace           = true
 
 [lints]
 workspace = true

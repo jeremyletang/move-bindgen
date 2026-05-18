@@ -5795,6 +5795,7 @@ dependencies = [
  "iota-sdk-crypto",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
+ "move-binary-format 0.0.3 (git+https://github.com/iotaledger/iota.git?rev=555e20ec91)",
  "move-bindgen-ext-core",
  "move-bindgen-ext-iota",
  "move-core-types 0.0.4 (git+https://github.com/iotaledger/iota.git?rev=555e20ec91)",
