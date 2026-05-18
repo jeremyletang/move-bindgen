@@ -18,6 +18,7 @@ mod install_manifest;
 mod ir;
 mod peer;
 mod reporter;
+mod workspace_deploy;
 
 pub use build::BuildOptions;
 pub use clean::{run as clean, CleanOutcome};
@@ -39,3 +40,7 @@ pub use ir::{
 };
 pub use peer::{foreign_addresses_used, InsertOutcome, PeerEntry, PeerMap};
 pub use reporter::{Reporter, ReporterMode};
+pub use workspace_deploy::{
+    build as build_workspace_deployer, member_from_bindings as workspace_deploy_member,
+    DeployCrate as WorkspaceDeployCrate, DeployMember as WorkspaceDeployMember,
+};

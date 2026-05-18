@@ -146,6 +146,14 @@ impl PackageDeployer {
         self
     }
 
+    /// Source-level parity with the IOTA side. No-op in the Sui stub.
+    pub fn with_log<F>(self, _f: F) -> Self
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        self
+    }
+
     pub async fn execute(self) -> Result<DeployResult, crate::ExecuteError> {
         unimplemented!("{NOT_YET_IMPLEMENTED}")
     }

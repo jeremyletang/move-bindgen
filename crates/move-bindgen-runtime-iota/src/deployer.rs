@@ -54,6 +54,12 @@ pub struct DeployResult {
     pub cache: ObjectCache,
 }
 
+/// Type alias for an optional log sink the deployer routes its
+/// gas-estimation / dep-patching trace through. Silent by default —
+/// users attach a callback via [`PackageDeployer::with_log`] when they
+/// want the play-by-play.
+pub type LogFn = Box<dyn Fn(&str) + Send + Sync>;
+
 /// Chainable builder produced by `Package::deployer(network)`. Holds
 /// references to `'static` bytecode tables emitted into
 /// `bytecode/<network>.rs` plus the per-call config slots (sender,
@@ -79,6 +85,7 @@ pub struct PackageDeployer {
     gas_price: Option<u64>,
     gas_budget: Option<u64>,
     policy: Option<UpgradePolicy>,
+    log: Option<LogFn>,
 }
 
 impl PackageDeployer {
@@ -107,6 +114,26 @@ impl PackageDeployer {
             gas_price: None,
             gas_budget: None,
             policy: None,
+            log: None,
+        }
+    }
+
+    /// Attach a log sink. Receives one line per gas-estimation /
+    /// dep-patching event during [`Self::execute`]. Silent by default;
+    /// pass `|s| eprintln!("{s}")` to see the trace.
+    pub fn with_log<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        self.log = Some(Box::new(f));
+        self
+    }
+
+    /// Internal: emit a single line through the configured log sink,
+    /// or drop it on the floor if no sink was attached.
+    fn log_line(&self, msg: impl AsRef<str>) {
+        if let Some(f) = &self.log {
+            f(msg.as_ref());
         }
     }
 
@@ -265,19 +292,19 @@ impl PackageDeployer {
             }
         }
         if !requested_but_unknown.is_empty() {
-            eprintln!(
+            self.log_line(format!(
                 "[deploy/patch] warning: resolve_dep({:?}) does not match any \
                  entry in DEP_LABELS — available names: {:?}",
                 requested_but_unknown,
                 self.dep_labels.iter().map(|(_, n)| *n).collect::<Vec<_>>()
-            );
+            ));
         }
 
         if subs.is_empty() {
-            eprintln!(
+            self.log_line(format!(
                 "[deploy/patch] no overrides active — using codegen-time bytes verbatim ({} dep_labels available)",
                 self.dep_labels.len(),
-            );
+            ));
             // Fast path: no patching needed, reuse precomputed digest.
             let modules = self.modules.iter().map(|m| m.to_vec()).collect();
             let dependencies = self
@@ -294,7 +321,7 @@ impl PackageDeployer {
             });
         }
 
-        eprintln!(
+        self.log_line(format!(
             "[deploy/patch] applying {} dep substitution(s): {:?}",
             subs.len(),
             self.dep_overrides
@@ -302,7 +329,7 @@ impl PackageDeployer {
                 .filter(|(n, _)| self.dep_labels.iter().any(|(_, dn)| dn == n))
                 .map(|(n, a)| format!("{n} → {a}"))
                 .collect::<Vec<_>>()
-        );
+        ));
 
         // Patched path. Walk each module, rewrite its address_identifiers
         // pool, then re-serialize. The chain re-derives module ids from
@@ -331,7 +358,7 @@ impl PackageDeployer {
             })?;
             modules.push(out);
         }
-        eprintln!(
+        self.log_line(format!(
             "[deploy/patch] patched {total_slots_patched} address-identifier slot(s) across {} module(s); {} other non-zero address(es) left as-is: {:?}",
             modules.len(),
             unresolved_addrs.len(),
@@ -339,7 +366,7 @@ impl PackageDeployer {
                 .iter()
                 .map(|a| format!("{a}"))
                 .collect::<Vec<_>>(),
-        );
+        ));
 
         let dependencies: Vec<ObjectId> = self
             .dependencies
@@ -432,11 +459,11 @@ impl PackageDeployer {
         // typed error before scanning for PackageWrite (which won't be
         // there on abort).
         let gas = &effects.as_v1().gas_used;
-        eprintln!(
+        self.log_line(format!(
             "[deploy/gas] actual on-chain: gas_used = {} nanos, net = {} nanos (after storage rebate)",
             gas.gas_used(),
             gas.net_gas_usage(),
-        );
+        ));
 
         if let ExecutionStatus::Failure { error, command } = effects.status() {
             return Err(ExecuteError::OnChain {
@@ -500,16 +527,16 @@ impl PackageDeployer {
             // that don't expose dry-run).
             let budget = match dry_run_budget(tx, oracle).await {
                 Ok((estimate, budget)) => {
-                    eprintln!(
+                    self.log_line(format!(
                         "[deploy/gas] dry-run estimated {estimate} nanos → budget {budget} (+20% margin)",
-                    );
+                    ));
                     budget
                 }
                 Err(e) => {
                     let fallback = oracle.suggest_gas_budget().await?;
-                    eprintln!(
+                    self.log_line(format!(
                         "[deploy/gas] dry-run estimate failed ({e}); falling back to oracle suggest = {fallback} nanos",
-                    );
+                    ));
                     fallback
                 }
             };

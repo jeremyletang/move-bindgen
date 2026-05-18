@@ -565,8 +565,43 @@ fn generate_workspace_from_staging(
         member_dirs.push(pkg.crate_name.clone());
     }
 
-    // Workspace-level Cargo.toml + .gitignore.
+    // Workspace-level deployer crate (`<workspace>-deploy`). Wires the
+    // generated `Package::deployer` entry points into one `deploy_all`
+    // call that topologically deploys every workspace member.
+    let deploy_members: Vec<move_bindgen::WorkspaceDeployMember> = loaded
+        .iter()
+        .filter_map(|(pkg, bindings)| {
+            let address_name = manifest
+                .find(&pkg.id)
+                .map(|p| p.address_name.as_str())
+                .unwrap_or("");
+            if address_name.is_empty() {
+                return None;
+            }
+            Some(move_bindgen::workspace_deploy_member(
+                address_name,
+                &pkg.crate_name,
+                bindings,
+            ))
+        })
+        .collect();
     let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &workspace_dir);
+    if let Some(deploy_crate) = move_bindgen::build_workspace_deployer(
+        &workspace_name,
+        &deploy_members,
+        &cfg.publish.networks,
+        &runtime,
+        manifest.flavour,
+    )? {
+        let deploy_dir = workspace_dir.join(&deploy_crate.dir_name);
+        std::fs::create_dir_all(deploy_dir.join("src"))?;
+        std::fs::write(deploy_dir.join("Cargo.toml"), &deploy_crate.cargo_toml)?;
+        std::fs::write(deploy_dir.join("src/lib.rs"), &deploy_crate.lib_rs)?;
+        member_dirs.push(deploy_crate.dir_name.clone());
+        reporter.stage("Generating", &deploy_crate.crate_name);
+    }
+
+    // Workspace-level Cargo.toml + .gitignore.
     let workspace_cargo = render_workspace_cargo_toml(&member_dirs, &runtime, manifest.flavour);
     std::fs::write(workspace_dir.join("Cargo.toml"), workspace_cargo)?;
     std::fs::write(workspace_dir.join(".gitignore"), "/target\n")?;
