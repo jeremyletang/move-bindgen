@@ -20,7 +20,7 @@ use move_package_alt_compilation::compiled_package::CompiledUnitWithSource;
 use sui_move_build::BuildConfig as SuiBuildConfig;
 use sui_package_alt::{mainnet_environment, testnet_environment, SuiFlavor};
 
-use super::{with_captured_stderr, BuildOptions, BuiltPackage, ConstantNames};
+use super::{with_captured_stderr, BuildOptions, BuiltPackage, ConstantNames, PublishArtifact};
 
 pub(super) fn build(path: &Path, opts: &BuildOptions) -> Result<BuiltPackage> {
     let cfg = make_config(opts);
@@ -52,6 +52,25 @@ pub(super) fn build(path: &Path, opts: &BuildOptions) -> Result<BuiltPackage> {
         name,
         published_at,
         modules,
+    })
+}
+
+/// Publish-flavoured build for Sui. Not yet implemented — codegen still
+/// emits the same `Package::deployer(...)` surface for Sui packages so
+/// the API stays at parity, but the runtime `PackageDeployer::execute`
+/// is a `unimplemented!`. Mirror this build path when wiring real Sui
+/// deploy: see `iota::build_publish` for the IOTA shape.
+pub(super) fn build_publish(
+    _path: &Path,
+    _opts: &BuildOptions,
+    network: &str,
+) -> Result<PublishArtifact> {
+    Ok(PublishArtifact {
+        network: network.to_string(),
+        modules: Vec::new(),
+        dependencies: Vec::new(),
+        digest: [0u8; 32],
+        dep_labels: Vec::new(),
     })
 }
 

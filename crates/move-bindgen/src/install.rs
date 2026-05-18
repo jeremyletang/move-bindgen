@@ -37,6 +37,9 @@ mod move_deps;
 mod staging_layout;
 mod worklist;
 
+pub(crate) use self::move_deps::read_addresses_block;
+pub use self::staging_layout::is_canonical_framework;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
@@ -44,10 +47,11 @@ use anyhow::{bail, Context, Result};
 
 use self::addresses::build_address_overrides;
 use self::manifest_rewrite::rewrite_staged_manifest;
-use self::move_deps::{dep_source_from_kind, read_move_deps, read_move_package_name};
+use self::move_deps::{
+    dep_source_from_kind, read_canonical_address_name, read_move_deps, read_move_package_name,
+};
 use self::staging_layout::{
-    copy_dir_recursive, is_canonical_framework, source_basename, source_key, unique_basename,
-    unique_basename_against,
+    copy_dir_recursive, source_basename, source_key, unique_basename, unique_basename_against,
 };
 use self::worklist::WorkItem;
 use crate::config::{default_crate_name, Config, PackageSource};
@@ -215,6 +219,19 @@ pub fn run(
             std::fs::canonicalize(&source_root).unwrap_or_else(|_| source_root.clone());
         let source_digest = crate::digest::source_dir_digest(&source_root)
             .with_context(|| format!("hashing source dir {}", source_root.display()))?;
+        // Canonical address-name read from the ORIGINAL Move.toml,
+        // before manifest_rewrite has had a chance to insert its
+        // lowercased-move-name shim. That keeps the recorded name
+        // matching what the package's source actually uses
+        // (e.g. `soul_bound`, not `soulbound`).
+        let address_name = read_canonical_address_name(&source_root.join("Move.toml"))
+            .with_context(|| {
+                format!(
+                    "reading canonical [addresses] name from {}",
+                    source_root.display()
+                )
+            })?
+            .unwrap_or_default();
 
         staged_basenames.insert(key, basename.clone());
         records.push(StagedRecord {
@@ -227,6 +244,7 @@ pub fn run(
                 source_abs_path,
                 source_digest,
                 framework,
+                address_name,
             },
             source_root,
         });

@@ -19,7 +19,7 @@ use crate::config::PackageSource;
 /// Distinct from `Config::framework_packages` — that one controls
 /// codegen routing (skip vs emit-as-peer). The decision here is solely
 /// about whether the Move source is part of the canonical framework.
-pub(super) fn is_canonical_framework(move_name: &str) -> bool {
+pub fn is_canonical_framework(move_name: &str) -> bool {
     matches!(
         move_name,
         "Iota"

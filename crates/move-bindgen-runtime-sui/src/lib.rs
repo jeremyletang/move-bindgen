@@ -35,6 +35,7 @@ pub use move_bindgen_ext_sui::{
 pub mod arguments;
 pub mod builder;
 pub mod cache;
+pub mod deployer;
 pub mod effects;
 pub mod framework;
 pub mod signer;
@@ -45,6 +46,7 @@ pub use arguments::{
 };
 pub use builder::{ExecuteError, InnerBuilder, PtbBuilder};
 pub use cache::{CachedObject, ObjectCache};
+pub use deployer::{DeployResult, PackageDeployer, UpgradePolicy};
 pub use effects::{EffectsDecodeError, EffectsExt, EventsError};
 pub use framework::{make_struct_tag, ID, SUI_FRAMEWORK_ADDRESS, UID};
 pub use signer::{DynSigner, SignError, SignFuture};

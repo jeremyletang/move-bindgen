@@ -89,6 +89,27 @@ runtime = {{ git = "{git_url}" }}
 # git    = "https://github.com/<owner>/<repo>.git"
 # rev    = "<commit-or-tag>"
 # subdir = "<sub-path-in-repo>"
+
+# Per-network deployable bytecode. Each entry produces an extra Move
+# build pass at codegen time and a `bytecode/<name>.rs` file in the
+# generated crate. The generated `Package::deployer(Network::...)`
+# entry point reads from there to publish the package on-chain.
+#
+# Empty `networks` (the default) silently skips deploy codegen — no
+# extra builds, no extra files, no `Package::deployer` emitted.
+#
+# Bare strings: `name` doubles as the `Move.lock` env name (== chain_id).
+# Tables: needed when the lock doesn't cover the network, or to
+# override a single named address.
+#
+# [publish]
+# networks = [
+#     "testnet",
+#     "mainnet",
+#     {{ name = "localnet", addresses = {{ iota = "0x2", std = "0x1" }} }},
+# ]
+[publish]
+networks = []
 "#,
         flavour_str = flavour.as_str(),
         git_url = DEFAULT_RUNTIME_GIT_URL,
@@ -212,6 +233,11 @@ mod tests {
             v["flavour"].as_str(),
             Some("iota"),
             "Iota flavour is recorded in the template"
+        );
+        assert_eq!(
+            v["publish"]["networks"].as_array().map(Vec::len),
+            Some(0),
+            "starter sets publish.networks = [] so deploy codegen is silently skipped"
         );
     }
 

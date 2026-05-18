@@ -46,11 +46,6 @@ path = "packages/metadata"
 [packages.oracle-mock-source]
 path = "packages/oracle-mock-source"
 
-# oracle-pyth-source is omitted: it depends on Pyth's git crate which
-# we have no local source for. Add a `[packages.pyth]` entry pointing at
-# a local Pyth checkout (or use configs/pyth.toml) if you need bindings
-# for it.
-
 [packages.soul-bound]
 path = "packages/soul-bound"
 
@@ -59,3 +54,6 @@ path = "packages/stable"
 
 [packages.test]
 path = "packages/test"
+
+[publish]
+networks = ["testnet", "mainnet"]

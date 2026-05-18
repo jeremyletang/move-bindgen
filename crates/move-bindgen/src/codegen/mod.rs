@@ -2,6 +2,7 @@
 
 mod constant;
 mod datatype;
+mod deploy;
 mod function;
 mod ty;
 
@@ -179,7 +180,10 @@ pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<Generated
         module_names.push(mod_name);
     }
 
-    let lib_rs = render_lib_rs(&module_names, &modules_with_at)?;
+    let deploy_codegen = deploy::build(&bindings.publish)?;
+    module_files.extend(deploy_codegen.files);
+
+    let lib_rs = render_lib_rs(&module_names, &modules_with_at, &deploy_codegen.lib_tokens)?;
     let cargo_toml = render_cargo_toml(
         &crate_name,
         &bindings.package_name,
@@ -216,7 +220,11 @@ fn render_module(body: TokenStream, module_doc: Option<&str>) -> Result<String> 
     Ok(prettyplease::unparse(&file))
 }
 
-fn render_lib_rs(modules: &[String], modules_with_at: &[String]) -> Result<String> {
+fn render_lib_rs(
+    modules: &[String],
+    modules_with_at: &[String],
+    deploy_tokens: &TokenStream,
+) -> Result<String> {
     let mod_decls = modules.iter().map(|n| {
         let ident = format_ident!("{}", n);
         quote! { pub mod #ident; }
@@ -275,6 +283,8 @@ fn render_lib_rs(modules: &[String], modules_with_at: &[String]) -> Result<Strin
         impl PackageAt {
             #( #pkg_at_methods )*
         }
+
+        #deploy_tokens
     };
     let file: syn::File =
         syn::parse2(lib).context("parsing generated lib.rs TokenStream as syn::File")?;

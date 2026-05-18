@@ -80,15 +80,16 @@ jobs:
         # because the crate is regenerated each run with no committed
         # `Cargo.lock` to lock against.
         #
-        # `--runtime-path` overrides the CLI's default (a git dep on
-        # the public move-bindgen repo). Without this override, the
-        # generated `counter-iota-rs/Cargo.toml` would pull
-        # `move-bindgen-runtime` from git master while the smoke crate
-        # uses a path-dep on the in-repo runtime — same crate name, two
-        # different builds in one Cargo graph → type mismatches.
+        # Driven through `--config configs/counter-iota.toml` (rather
+        # than zero-config generate) so the `[publish]` block in that
+        # config takes effect — that's what wires up the
+        # `Package::deployer(Network::…)` surface the `examples/deploy.rs`
+        # smoke test type-checks against. The config already points
+        # `runtime` at the in-repo path, so we don't need
+        # `--runtime-path` to avoid the same-crate-twice graph issue.
         run: |
-          ./target/debug/move-bindgen generate packages/counter-iota \
-              --runtime-path ../../crates/move-bindgen-runtime-iota \
+          ./target/debug/move-bindgen install  --config configs/counter-iota.toml
+          ./target/debug/move-bindgen generate --config configs/counter-iota.toml \
               -o generated/counter-iota-rs
           (cd generated/counter-iota-rs && cargo check)
           (cd tests/counter-smoke-iota && cargo test && cargo check --examples)

@@ -1455,6 +1455,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "move-binary-format"
+version = "0.0.3"
+source = "git+https://github.com/iotaledger/iota.git?rev=555e20ec91#555e20ec91f0bf9284901b88a6471a570294f0e5"
+dependencies = [
+ "anyhow",
+ "enum-compat-util",
+ "indexmap 2.14.0",
+ "move-core-types",
+ "move-proc-macros",
+ "ref-cast",
+ "serde",
+ "variant_count",
+]
+
+[[package]]
 name = "move-bindgen-ext-core"
 version = "0.1.0"
 dependencies = [
@@ -1488,6 +1503,7 @@ dependencies = [
  "iota-sdk-crypto",
  "iota-sdk-transaction-builder",
  "iota-sdk-types",
+ "move-binary-format",
  "move-bindgen-ext-core",
  "move-bindgen-ext-iota",
  "move-core-types",
@@ -2861,6 +2877,17 @@ name = "variadics_please"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41b6d82be61465f97d42bd1d15bf20f3b0a3a0905018f38f9d6f6962055b0b5c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "variant_count"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1935e10c6f04d22688d07c0790f2fc0e1b1c5c2c55bc0cc87ed67656e587dd8"
 dependencies = [
  "proc-macro2",
  "quote",

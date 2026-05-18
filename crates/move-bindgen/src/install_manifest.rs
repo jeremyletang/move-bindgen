@@ -83,6 +83,14 @@ pub struct StagedPackage {
     /// (Iota framework + Move stdlib). No codegen runs for it; refs to
     /// its types route into the runtime via the well-known mapping.
     pub framework: bool,
+    /// Canonical Move-source address name for this package — the entry
+    /// in the original `Move.toml`'s `[addresses]` block whose value is
+    /// `"0x0"` or `"_"` (the slot the chain substitutes the new package
+    /// id into at publish time). Empty when not determinable (framework
+    /// packages have hardcoded addresses; some packages may have
+    /// multiple or zero qualifying entries).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub address_name: String,
 }
 
 /// Persistable form of `crate::config::PackageSource`. Untagged enums
@@ -196,6 +204,7 @@ mod tests {
                 source_abs_path: PathBuf::from("/abs/exchange"),
                 source_digest: "sha256:dead".into(),
                 framework: false,
+                address_name: "real_markets".into(),
             }],
             address_overrides: overrides,
         };
@@ -229,6 +238,7 @@ mod tests {
                 source_abs_path: PathBuf::from("/home/u/.move/foo/contracts"),
                 source_digest: "sha256:cafe".into(),
                 framework: false,
+                address_name: String::new(),
             }],
             address_overrides: BTreeMap::new(),
         };

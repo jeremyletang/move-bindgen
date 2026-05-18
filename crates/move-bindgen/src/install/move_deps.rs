@@ -86,7 +86,25 @@ pub(super) fn parse_dep_table(alias: &str, dep_table: &toml::value::Table) -> Re
     bail!("dependency '{}' has neither `local` nor `git`", alias)
 }
 
-pub(super) fn read_addresses_block(move_toml: &Path) -> Result<BTreeMap<String, String>> {
+/// Read the package's own canonical address name from a Move.toml.
+/// That's the single entry in `[addresses]` whose value is `"0x0"` or
+/// `"_"` — the slot the chain substitutes the new package id into at
+/// publish time. Returns `None` if the package has no such entry
+/// (framework packages declare hardcoded addresses) or if multiple
+/// entries qualify (rare; we deliberately don't guess).
+pub(crate) fn read_canonical_address_name(move_toml: &Path) -> Result<Option<String>> {
+    let addrs = read_addresses_block(move_toml)?;
+    let mut placeholders = addrs
+        .into_iter()
+        .filter_map(|(k, v)| matches!(v.as_str(), "0x0" | "_").then_some(k));
+    let first = placeholders.next();
+    if placeholders.next().is_some() {
+        return Ok(None);
+    }
+    Ok(first)
+}
+
+pub(crate) fn read_addresses_block(move_toml: &Path) -> Result<BTreeMap<String, String>> {
     let text = std::fs::read_to_string(move_toml)
         .with_context(|| format!("reading {}", move_toml.display()))?;
     let v: toml::Value =

@@ -421,9 +421,11 @@ fn generate_single_from_staging(
         .ok_or_else(|| anyhow::anyhow!("staging manifest has no packages"))?;
     let pkg_path = staging_root.join(&pkg.staged_path);
     reporter.stage("Compiling", &pkg.move_name);
-    let bindings = move_bindgen::load_package_with_options(
+    let bindings = move_bindgen::load_package_for_publish(
         &pkg_path,
         &make_build_opts(overrides, reporter, manifest.flavour),
+        &cfg.publish.networks,
+        Some(reporter),
     )?;
     let out_name = cfg
         .output_name
@@ -471,8 +473,17 @@ fn generate_workspace_from_staging(
         .unwrap_or_else(|| cfg.config_dir.join(&workspace_name));
 
     // Load every staged package and build the peer map keyed by
-    // address. Framework-marked entries are skipped: the runtime owns
-    // their types and ty.rs's well-known mappings handle the routing.
+    // address. Codegen-framework-marked entries are skipped: the
+    // runtime owns their types and ty.rs's well-known mappings handle
+    // the routing.
+    //
+    // Publish-bytes are emitted for every non-canonical-framework
+    // package — that includes transitively-discovered user packages
+    // like the dex repo's `funding` / `fixed18` / `PriceFeed`. The
+    // *canonical* framework list (`Iota` / `MoveStdlib` / `Sui` / …)
+    // is what's already on-chain and not republishable — distinct
+    // from the user-controlled `framework_packages` config which only
+    // affects codegen routing.
     let mut loaded = Vec::with_capacity(manifest.packages.len());
     let mut peers = PeerMap::new();
     for pkg in &manifest.packages {
@@ -481,9 +492,16 @@ fn generate_workspace_from_staging(
         }
         let pkg_path = staging_root.join(&pkg.staged_path);
         reporter.stage("Compiling", &pkg.move_name);
-        let bindings = move_bindgen::load_package_with_options(
+        let publish_networks = if move_bindgen::is_canonical_framework(&pkg.move_name) {
+            &[][..]
+        } else {
+            cfg.publish.networks.as_slice()
+        };
+        let bindings = move_bindgen::load_package_for_publish(
             &pkg_path,
             &make_build_opts(overrides, reporter, manifest.flavour),
+            publish_networks,
+            Some(reporter),
         )?;
         let addr = bindings_address(&bindings);
         match peers.insert(addr, pkg.crate_name.clone()) {
@@ -547,8 +565,43 @@ fn generate_workspace_from_staging(
         member_dirs.push(pkg.crate_name.clone());
     }
 
-    // Workspace-level Cargo.toml + .gitignore.
+    // Workspace-level deployer crate (`<workspace>-deploy`). Wires the
+    // generated `Package::deployer` entry points into one `deploy_all`
+    // call that topologically deploys every workspace member.
+    let deploy_members: Vec<move_bindgen::WorkspaceDeployMember> = loaded
+        .iter()
+        .filter_map(|(pkg, bindings)| {
+            let address_name = manifest
+                .find(&pkg.id)
+                .map(|p| p.address_name.as_str())
+                .unwrap_or("");
+            if address_name.is_empty() {
+                return None;
+            }
+            Some(move_bindgen::workspace_deploy_member(
+                address_name,
+                &pkg.crate_name,
+                bindings,
+            ))
+        })
+        .collect();
     let runtime = relativize_runtime(&cfg.runtime, &cfg.config_dir, &workspace_dir);
+    if let Some(deploy_crate) = move_bindgen::build_workspace_deployer(
+        &workspace_name,
+        &deploy_members,
+        &cfg.publish.networks,
+        &runtime,
+        manifest.flavour,
+    )? {
+        let deploy_dir = workspace_dir.join(&deploy_crate.dir_name);
+        std::fs::create_dir_all(deploy_dir.join("src"))?;
+        std::fs::write(deploy_dir.join("Cargo.toml"), &deploy_crate.cargo_toml)?;
+        std::fs::write(deploy_dir.join("src/lib.rs"), &deploy_crate.lib_rs)?;
+        member_dirs.push(deploy_crate.dir_name.clone());
+        reporter.stage("Generating", &deploy_crate.crate_name);
+    }
+
+    // Workspace-level Cargo.toml + .gitignore.
     let workspace_cargo = render_workspace_cargo_toml(&member_dirs, &runtime, manifest.flavour);
     std::fs::write(workspace_dir.join("Cargo.toml"), workspace_cargo)?;
     std::fs::write(workspace_dir.join(".gitignore"), "/target\n")?;
@@ -787,7 +840,13 @@ fn write_crate(out_dir: &std::path::Path, c: &move_bindgen::GeneratedCrate) -> a
     std::fs::write(out_dir.join("Cargo.toml"), &c.cargo_toml)?;
     std::fs::write(src_dir.join("lib.rs"), &c.lib_rs)?;
     for (name, body) in &c.module_files {
-        std::fs::write(src_dir.join(name), body)?;
+        let path = src_dir.join(name);
+        // `name` may be a nested path (e.g. `bytecode/testnet.rs`) —
+        // ensure the parent directory exists before writing.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, body)?;
     }
     Ok(())
 }
