@@ -37,8 +37,8 @@ mod move_deps;
 mod staging_layout;
 mod worklist;
 
-pub use self::staging_layout::is_canonical_framework;
 pub(crate) use self::move_deps::read_addresses_block;
+pub use self::staging_layout::is_canonical_framework;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};

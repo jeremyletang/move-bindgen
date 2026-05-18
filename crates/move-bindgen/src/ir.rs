@@ -118,10 +118,7 @@ pub fn load_package_for_publish(
     let mut publish = Vec::with_capacity(networks.len());
     for net in networks {
         if let Some(r) = reporter {
-            r.stage(
-                "Compiling",
-                format!("{} (publish/{})", pkg.name, net.name),
-            );
+            r.stage("Compiling", format!("{} (publish/{})", pkg.name, net.name));
         }
         let pub_opts = publish_opts(opts, net, &own_address_names);
         let artifact = build_publish(path, &pub_opts, &net.name)?;

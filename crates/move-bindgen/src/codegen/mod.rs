@@ -183,11 +183,7 @@ pub fn generate(bindings: &Bindings, opts: &GenerateOptions) -> Result<Generated
     let deploy_codegen = deploy::build(&bindings.publish)?;
     module_files.extend(deploy_codegen.files);
 
-    let lib_rs = render_lib_rs(
-        &module_names,
-        &modules_with_at,
-        &deploy_codegen.lib_tokens,
-    )?;
+    let lib_rs = render_lib_rs(&module_names, &modules_with_at, &deploy_codegen.lib_tokens)?;
     let cargo_toml = render_cargo_toml(
         &crate_name,
         &bindings.package_name,

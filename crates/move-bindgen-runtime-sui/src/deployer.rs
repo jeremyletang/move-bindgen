@@ -91,7 +91,10 @@ impl PackageDeployer {
     }
 
     /// Source-level parity with the IOTA side. No-op in the Sui stub.
-    pub fn resolve_from(self, _resolved: &std::collections::HashMap<&'static str, Address>) -> Self {
+    pub fn resolve_from(
+        self,
+        _resolved: &std::collections::HashMap<&'static str, Address>,
+    ) -> Self {
         self
     }
 

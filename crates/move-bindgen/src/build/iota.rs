@@ -124,7 +124,6 @@ pub(super) fn build_publish(
     })
 }
 
-
 /// Shared compile path used by both [`build`] and [`build_publish`].
 /// Registers the IOTA package hooks and forwards options to
 /// `iota-move-build`.

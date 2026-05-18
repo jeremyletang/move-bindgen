@@ -253,9 +253,10 @@ impl PackageDeployer {
         let mut subs: HashMap<AccountAddress, AccountAddress> = HashMap::new();
         let mut requested_but_unknown: Vec<&str> = Vec::new();
         for (name, real) in &self.dep_overrides {
-            let synth = self.dep_labels.iter().find_map(|(s, n)| {
-                (*n == name.as_str()).then_some(*s)
-            });
+            let synth = self
+                .dep_labels
+                .iter()
+                .find_map(|(s, n)| (*n == name.as_str()).then_some(*s));
             match synth {
                 Some(s) => {
                     subs.insert(addr_to_core(s), addr_to_core(*real));
@@ -268,10 +269,7 @@ impl PackageDeployer {
                 "[deploy/patch] warning: resolve_dep({:?}) does not match any \
                  entry in DEP_LABELS — available names: {:?}",
                 requested_but_unknown,
-                self.dep_labels
-                    .iter()
-                    .map(|(_, n)| *n)
-                    .collect::<Vec<_>>()
+                self.dep_labels.iter().map(|(_, n)| *n).collect::<Vec<_>>()
             );
         }
 
@@ -425,10 +423,7 @@ impl PackageDeployer {
         let built = tx
             .finish()
             .map_err(|e| ExecuteError::Finish(e.to_string()))?;
-        let signature = signer
-            .sign_dyn(&built)
-            .await
-            .map_err(ExecuteError::Sign)?;
+        let signature = signer.sign_dyn(&built).await.map_err(ExecuteError::Sign)?;
         let effects = submitter.submit(&built, &[signature]).await?;
 
         // The submit RPC returns Ok for both successful and *aborted*
