@@ -58,6 +58,13 @@ public struct Counter has key, store {
     /// Optional reference to another on-chain object (e.g. the next
     /// counter in a chain). Set via [`set_target`].
     target: Option<ID>,
+    /// Free-form utf8 label — exercises `0x1::string::String` in
+    /// pure-input and return positions. Mutated by [`set_label`].
+    label: std::string::String,
+    /// ASCII-only tag — exercises `0x1::ascii::String` in the same
+    /// positions. Distinct from [`label`] so the bindings generator
+    /// has to keep the two stdlib string types apart.
+    tag: std::ascii::String,
 }
 
 /// Capability granting privileged operations on a [`Counter`]. Minted once
@@ -79,6 +86,8 @@ public fun create(ctx: &mut TxContext): AdminCap {
         value: 0,
         big_value: 0,
         target: option::none(),
+        label: std::string::utf8(b""),
+        tag: std::ascii::string(b""),
     });
     AdminCap { id: object::new(ctx) }
 }
@@ -134,6 +143,35 @@ public fun value(c: &Counter): u64 {
 /// Read the address that created this counter.
 public fun owner(c: &Counter): address {
     c.owner
+}
+
+/// Overwrite `c.label`. Exercises `0x1::string::String` as a
+/// pure-input parameter — the bindings generator must accept Rust
+/// `String` here and BCS-serialise it as `vector<u8>`.
+public fun set_label(c: &mut Counter, label: std::string::String) {
+    c.label = label;
+}
+
+/// Read `c.label`. Exercises `0x1::string::String` as a return
+/// type — the bindings generator must decode the result as Rust
+/// `String`.
+public fun label(c: &Counter): std::string::String {
+    c.label
+}
+
+/// Overwrite `c.tag`. Exercises `0x1::ascii::String` as a pure-input
+/// parameter — distinct from `set_label` so the bindings generator
+/// has to route this through `AsciiString` / `PureAsciiString`, not
+/// `String` / `PureString`.
+public fun set_tag(c: &mut Counter, tag: std::ascii::String) {
+    c.tag = tag;
+}
+
+/// Read `c.tag`. Exercises `0x1::ascii::String` as a return type —
+/// the bindings generator must decode this as `AsciiString`, not
+/// `String`.
+public fun tag(c: &Counter): std::ascii::String {
+    c.tag
 }
 
 /// Multi-return fixture — exercises codegen's tuple-return path.

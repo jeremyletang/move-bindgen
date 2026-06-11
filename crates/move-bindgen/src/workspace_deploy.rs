@@ -288,6 +288,11 @@ fn render_lib_rs(
                         .with_client(client.clone())
                         .with_signer(signer.clone())
                         .with_auto_gas();
+                    if let Some(b) = self.gas_budget {
+                        // Explicit budget skips the per-step dry-run
+                        // probe entirely (see `PackageDeployer`).
+                        deployer = deployer.gas_budget(b);
+                    }
                     if let Some(log) = self.log.clone() {
                         deployer = deployer.with_log(move |s| log(s));
                     }
@@ -300,6 +305,7 @@ fn render_lib_rs(
                                 address_name: #address_name_lit,
                                 crate_name: #display_name,
                                 package_id: r.package_id,
+                                digest: r.effects.as_v1().transaction_digest,
                                 created_objects: created,
                             });
                             // Wait for the indexer to ingest this tx's
@@ -363,6 +369,10 @@ fn render_lib_rs(
             pub crate_name: &'static str,
             /// Object id of the newly-published package.
             pub package_id: Address,
+            /// Digest of the publish transaction — lets callers build
+            /// a complete audit log of every tx the deploy submitted
+            /// without re-querying the indexer.
+            pub digest: iota_sdk_types::Digest,
             /// Non-package objects created during the publish — at
             /// minimum the `UpgradeCap`, plus anything the package's
             /// `init` function created and shared/transferred.
@@ -434,11 +444,12 @@ fn render_lib_rs(
         pub struct DeployAll {
             network: Network,
             log: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>,
+            gas_budget: Option<u64>,
         }
 
         impl DeployAll {
             pub fn new(network: Network) -> Self {
-                Self { network, log: None }
+                Self { network, log: None, gas_budget: None }
             }
 
             /// Attach a log sink. The callback receives one line per
@@ -449,6 +460,18 @@ fn render_lib_rs(
                 F: Fn(&str) + Send + Sync + 'static,
             {
                 self.log = Some(std::sync::Arc::new(f));
+                self
+            }
+
+            /// Set an explicit per-step gas budget (in nanos), applied
+            /// to **every** package publish. Skips each step's dry-run
+            /// gas probe — useful when the deployer wallet is too thin
+            /// for the probe, or when the cost profile is already
+            /// known. Size it for the most expensive package in the
+            /// workspace: unused budget isn't charged, but every step
+            /// requires the gas coin to cover the full value.
+            pub fn with_gas_budget(mut self, b: u64) -> Self {
+                self.gas_budget = Some(b);
                 self
             }
 
@@ -542,4 +565,78 @@ fn to_pascal_case(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::PublishNetwork;
+
+    fn fake_members() -> Vec<DeployMember> {
+        vec![
+            DeployMember {
+                address_name: "fixed18".into(),
+                crate_name: "fixed18-rs".into(),
+                direct_deps: vec![],
+                module_count: 1,
+            },
+            DeployMember {
+                address_name: "exchange".into(),
+                crate_name: "exchange-rs".into(),
+                direct_deps: vec!["fixed18".into()],
+                module_count: 3,
+            },
+        ]
+    }
+
+    fn render() -> DeployCrate {
+        let networks = vec![PublishNetwork {
+            name: "testnet".into(),
+            chain_id: None,
+            addresses: Default::default(),
+        }];
+        build(
+            "exchange-rs",
+            &fake_members(),
+            &networks,
+            &RuntimeSpec::default_git(),
+            Flavour::Iota,
+        )
+        .expect("build should succeed")
+        .expect("two deployable members should emit a crate")
+    }
+
+    // `render_lib_rs` round-trips its TokenStream through
+    // `syn::parse2`, so reaching these assertions proves the template
+    // is syntactically valid Rust. The `contains` checks pin the
+    // surface added for the BUGS/ reports: per-step digests and the
+    // explicit gas-budget escape hatch.
+    #[test]
+    fn deploy_step_carries_publish_digest() {
+        let lib = render().lib_rs;
+        assert!(lib.contains("pub digest: iota_sdk_types::Digest"));
+        assert!(lib.contains("digest: r.effects.as_v1().transaction_digest"));
+    }
+
+    #[test]
+    fn deploy_all_exposes_gas_budget_knob() {
+        let lib = render().lib_rs;
+        assert!(lib.contains("pub fn with_gas_budget(mut self, b: u64) -> Self"));
+        assert!(lib.contains("deployer = deployer.gas_budget(b);"));
+    }
+
+    #[test]
+    fn deploy_order_is_topological() {
+        let lib = render().lib_rs;
+        let fixed18 = lib
+            .find(r#"crate_name: "fixed18-rs""#)
+            .expect("fixed18 step");
+        let exchange = lib
+            .find(r#"crate_name: "exchange-rs""#)
+            .expect("exchange step");
+        assert!(
+            fixed18 < exchange,
+            "fixed18 (dependency) must deploy before exchange"
+        );
+    }
 }

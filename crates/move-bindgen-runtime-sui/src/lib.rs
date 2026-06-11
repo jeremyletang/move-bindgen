@@ -23,13 +23,13 @@ pub use sui_sdk_types::{
 pub use sui_transaction_builder::TransactionBuilder;
 
 pub use move_bindgen_ext_sui::{
-    pure_bytes_of, u256_le, Argument, ClientExt, DecodeError, DryRunError, DryRunEstimateFuture,
-    DryRunFuture, DryRunner, EventReader, EventReaderError, EventsByTxFuture, FetchError,
-    FetchFuture, FetchedObject, Fetcher, FindByTypeFuture, FindError, GasOracle, GetError,
-    InputKind, InspectResult, ListGasCoinsFuture, MoveArg, MoveType, NoPackage, ObjectId,
+    pure_bytes_of, u256_le, Argument, AsciiString, ClientExt, DecodeError, DryRunError,
+    DryRunEstimateFuture, DryRunFuture, DryRunner, EventReader, EventReaderError, EventsByTxFuture,
+    FetchError, FetchFuture, FetchedObject, Fetcher, FindByTypeFuture, FindError, GasOracle,
+    GetError, InputKind, InspectResult, ListGasCoinsFuture, MoveArg, MoveType, NoPackage, ObjectId,
     ObjectTypeFinder, OracleError, PTBArgument, PackageAddrs, PackageRegistry, PureBytes,
     Receiving, RefGasPriceFuture, Shared, SharedMut, SubmitError, SubmitFuture, Submitter,
-    SuggestBudgetFuture, WaitError, WaitOptions, U256,
+    SuggestBudgetFuture, WaitError, WaitOptions, MOVE_STDLIB_ADDRESS, U256,
 };
 
 pub mod arguments;
@@ -41,8 +41,8 @@ pub mod framework;
 pub mod signer;
 
 pub use arguments::{
-    ArgumentObject, PureAddress, PureBool, PureID, PureOption, PureString, PureU128, PureU16,
-    PureU256, PureU32, PureU64, PureU8, PureVec,
+    ArgumentObject, PureAddress, PureAsciiString, PureBool, PureID, PureOption, PureString,
+    PureU128, PureU16, PureU256, PureU32, PureU64, PureU8, PureVec,
 };
 pub use builder::{ExecuteError, InnerBuilder, PtbBuilder};
 pub use cache::{CachedObject, ObjectCache};
@@ -80,6 +80,36 @@ mod tests {
                 assert_eq!(s.name().as_str(), "ID");
             }
             other => panic!("ID::type_tag must be a struct tag, got {other:?}"),
+        }
+    }
+
+    // The two tests below pin down the fix for the
+    // `move-bindgen-string-typetag` bug — generic-position string
+    // arguments must reach chain as `Struct(0x1::string::String)` /
+    // `Struct(0x1::ascii::String)`, never `Vector(U8)`.
+    #[test]
+    fn string_move_type_targets_move_stdlib_string() {
+        let reg = PackageRegistry::new();
+        match <String as MoveType>::type_tag(&reg) {
+            TypeTag::Struct(s) => {
+                assert_eq!(*s.address(), MOVE_STDLIB_ADDRESS);
+                assert_eq!(s.module().as_str(), "string");
+                assert_eq!(s.name().as_str(), "String");
+            }
+            other => panic!("String::type_tag must be a struct tag, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ascii_string_move_type_targets_move_stdlib_ascii() {
+        let reg = PackageRegistry::new();
+        match <AsciiString as MoveType>::type_tag(&reg) {
+            TypeTag::Struct(s) => {
+                assert_eq!(*s.address(), MOVE_STDLIB_ADDRESS);
+                assert_eq!(s.module().as_str(), "ascii");
+                assert_eq!(s.name().as_str(), "String");
+            }
+            other => panic!("AsciiString::type_tag must be a struct tag, got {other:?}"),
         }
     }
 

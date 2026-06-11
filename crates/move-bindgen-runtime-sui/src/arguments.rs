@@ -11,8 +11,8 @@ use move_bindgen_ext_core::decl_pure_trait;
 use serde::Serialize;
 
 use crate::{
-    framework::ID, Address, Argument, MoveArg, ObjectId, ObjectReference, PTBArgument, PtbBuilder,
-    Receiving, Shared, SharedMut, U256,
+    framework::ID, Address, Argument, AsciiString, MoveArg, ObjectId, ObjectReference, PTBArgument,
+    PtbBuilder, Receiving, Shared, SharedMut, U256,
 };
 
 decl_pure_trait!(PureBool, bool);
@@ -24,6 +24,49 @@ decl_pure_trait!(PureU128, u128);
 decl_pure_trait!(PureAddress, Address);
 decl_pure_trait!(PureString, String);
 decl_pure_trait!(PureID, ID);
+
+/// `0x1::ascii::String` marker. Hand-rolled (rather than via
+/// `decl_pure_trait!`) because `AsciiString` lives in
+/// `move-bindgen-ext-core` and `MoveArg` / `PTBArgument` live in
+/// `move-bindgen-ext-sui` / the Sui SDK — orphan rules forbid an
+/// `impl MoveArg for AsciiString` in this crate, so we bypass
+/// `apply_argument` and push a `Pure` input directly. Wire format is
+/// identical to Rust `String` (BCS-encoded `vector<u8>`); only the
+/// on-chain `TypeTag` differs.
+pub trait PureAsciiString {
+    #[allow(async_fn_in_trait)]
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized;
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
+}
+
+impl PureAsciiString for AsciiString {
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument {
+        b.inner.tx.pure_bytes(
+            bcs::to_bytes(&self.0).expect("bcs serialization of AsciiString never fails"),
+        )
+    }
+}
+
+impl PureAsciiString for Argument {
+    async fn into_argument(self, _b: &mut PtbBuilder) -> Argument {
+        self
+    }
+}
 
 /// `PureU256` lives outside `decl_pure_trait` because Move's wire
 /// format is 32 LE bytes, while `primitive_types::U256`'s default

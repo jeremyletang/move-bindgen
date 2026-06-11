@@ -18,7 +18,18 @@ use iota_sdk_types::{
 };
 
 pub use move_bindgen_ext_core::{
-    u256_le, DryRunError, EventReaderError, FindError, NoPackage, SubmitError, WaitOptions,
+    u256_le, AsciiString, DryRunError, EventReaderError, FindError, NoPackage, SubmitError,
+    WaitOptions,
+};
+
+/// Canonical address of the `move-stdlib` framework package (`0x1`).
+/// Generated code references `0x1::string::String` and
+/// `0x1::ascii::String` through this constant rather than the runtime
+/// `PackageAddrs` lookup — both are well-known across deployments.
+pub const MOVE_STDLIB_ADDRESS: Address = {
+    let mut bytes = [0u8; 32];
+    bytes[31] = 0x01;
+    Address::new(bytes)
 };
 
 move_bindgen_ext_core::define_backend_traits! {
@@ -32,6 +43,35 @@ move_bindgen_ext_core::define_backend_traits! {
     digest               = Digest,
     struct_tag           = StructTag,
     identifier           = iota_sdk_types::Identifier,
+}
+
+// `MoveType` impls for the two stdlib string types. Codegen maps Move
+// `0x1::string::String` to Rust `String` and `0x1::ascii::String` to
+// the dedicated `AsciiString` newtype — both must produce the correct
+// struct `TypeTag` at generic-position instantiations, or the VM will
+// reject the call with `TypeMismatch`.
+impl MoveType for String {
+    type Package = NoPackage;
+    const MODULE: &'static str = "string";
+    const NAME: &'static str = "String";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        make_struct_tag_export(MOVE_STDLIB_ADDRESS, "string", "String", Vec::new())
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
+        make_struct_tag_export(MOVE_STDLIB_ADDRESS, "string", "String", Vec::new())
+    }
+}
+
+impl MoveType for AsciiString {
+    type Package = NoPackage;
+    const MODULE: &'static str = "ascii";
+    const NAME: &'static str = "String";
+    fn type_tag(_: &impl PackageAddrs) -> TypeTag {
+        make_struct_tag_export(MOVE_STDLIB_ADDRESS, "ascii", "String", Vec::new())
+    }
+    fn type_tag_at(_: Address) -> TypeTag {
+        make_struct_tag_export(MOVE_STDLIB_ADDRESS, "ascii", "String", Vec::new())
+    }
 }
 
 mod client;

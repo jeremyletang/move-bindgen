@@ -273,9 +273,11 @@ fn datatype_bound(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStrea
                 let inner_rust = rust_type(inner, ctx)?;
                 return Ok(quote!(impl PureOption<#inner_rust>));
             }
-            ("string", "String") | ("ascii", "String") => {
-                return Ok(quote!(impl PureString));
-            }
+            // `string::String` and `ascii::String` map to distinct
+            // Rust types — see `codegen/ty.rs` — so their pure-arg
+            // bounds split too.
+            ("string", "String") => return Ok(quote!(impl PureString)),
+            ("ascii", "String") => return Ok(quote!(impl PureAsciiString)),
             _ => {}
         }
     }

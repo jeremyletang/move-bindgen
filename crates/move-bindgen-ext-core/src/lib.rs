@@ -29,6 +29,50 @@ use std::time::Duration;
 /// body.
 pub struct NoPackage;
 
+/// Rust mirror of Move's `0x1::ascii::String`. Wire-compatible with
+/// `0x1::string::String` and Rust `String` (BCS in all three cases is
+/// length-prefixed `Vec<u8>`), but a distinct Rust type so generated
+/// code can route it to the correct `TypeTag` at generic-instantiation
+/// positions — i.e. a `move_call::<AsciiString>` produces
+/// `TypeTag::Struct(0x1::ascii::String)`, not `Vector(U8)`.
+///
+/// Codegen maps `0x1::ascii::String` to this; `0x1::string::String`
+/// keeps mapping to Rust's `std::string::String`.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
+#[serde(transparent)]
+pub struct AsciiString(pub String);
+
+impl From<String> for AsciiString {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for AsciiString {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
+impl From<AsciiString> for String {
+    fn from(a: AsciiString) -> Self {
+        a.0
+    }
+}
+
+impl ::std::ops::Deref for AsciiString {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl ::std::fmt::Display for AsciiString {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
 /// Tunables for `ClientExt::wait_for_effects` and
 /// `wait_for_object`. `interval` is the indexer-poll cadence;
 /// `timeout` is how long the call waits before erroring.
@@ -168,7 +212,9 @@ pub mod u256_le {
 // The macro emits, in the call site's namespace:
 //
 //   PackageAddrs trait + PackageRegistry struct + impls
-//   MoveType trait + primitive impls (bool, u8..u128, U256, Address, String, Vec<T>)
+//   MoveType trait + primitive impls (bool, u8..u128, U256, Address, Vec<T>)
+//   (NB: `String` / `AsciiString` MoveType impls are added by each flavour's
+//   ext crate, since they need the flavour-specific `0x1` constructor.)
 //   make_struct_tag_export helper
 //   FetchedObject enum + FetchError + Fetcher trait + Arc/Box blankets + FetchFuture<'a>
 //   Submitter trait + SubmitFuture<'a>
@@ -382,19 +428,11 @@ macro_rules! define_backend_traits {
             }
         }
 
-        impl MoveType for String {
-            // Move's `0x1::string::String` is `vector<u8>` on the
-            // wire; the SDK convention is the same here.
-            type Package = $crate::NoPackage;
-            const MODULE: &'static str = "";
-            const NAME: &'static str = "";
-            fn type_tag(_: &impl PackageAddrs) -> $TypeTag {
-                <$TypeTag>::Vector(Box::new(<$TypeTag>::U8))
-            }
-            fn type_tag_at(_: $Address) -> $TypeTag {
-                <$TypeTag>::Vector(Box::new(<$TypeTag>::U8))
-            }
-        }
+        // NB: `impl MoveType for String` and `impl MoveType for
+        // AsciiString` are **not** emitted here — they live in each
+        // flavour's ext crate (`move-bindgen-ext-iota` /
+        // `-sui`) so the `0x1` move_stdlib address can be constructed
+        // with the flavour's own `Address` constructor.
 
         impl<T: MoveType> MoveType for Vec<T> {
             type Package = $crate::NoPackage;
