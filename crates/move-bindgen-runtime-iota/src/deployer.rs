@@ -520,12 +520,16 @@ impl PackageDeployer {
         }
         if self.gas_budget.is_none() {
             // Dry-run-based probe — clone the in-progress builder, set
-            // a high temporary budget so the clone can `.finish()`, ask
+            // a temporary sim budget so the clone can `.finish()`, ask
             // the oracle for actual gas usage, then set the real budget
-            // to `used + 20%`. Falls back to the oracle's conservative
-            // suggest if the dry-run itself fails (e.g. on networks
-            // that don't expose dry-run).
-            let budget = match dry_run_budget(tx, oracle).await {
+            // to `used + 20%`. The probe adapts to low-balance wallets
+            // by halving its sim budget on gas-related rejections (see
+            // `dry_run_budget`). Falls back to the oracle's
+            // conservative suggest if the dry-run still fails (e.g. on
+            // networks that don't expose dry-run). For full control,
+            // set `.gas_budget(N)` explicitly — that skips all of this.
+            let log = |s: &str| self.log_line(s);
+            let budget = match dry_run_budget(tx, oracle, &log).await {
                 Ok((estimate, budget)) => {
                     self.log_line(format!(
                         "[deploy/gas] dry-run estimated {estimate} nanos → budget {budget} (+20% margin)",
@@ -535,7 +539,8 @@ impl PackageDeployer {
                 Err(e) => {
                     let fallback = oracle.suggest_gas_budget().await?;
                     self.log_line(format!(
-                        "[deploy/gas] dry-run estimate failed ({e}); falling back to oracle suggest = {fallback} nanos",
+                        "[deploy/gas] dry-run estimate failed ({e}); falling back to oracle suggest = {fallback} nanos. \
+                         If the publish needs more than this, set an explicit `.gas_budget(N)`.",
                     ));
                     fallback
                 }
@@ -546,24 +551,70 @@ impl PackageDeployer {
     }
 }
 
-/// Clone the in-progress builder, set a generous sim budget so the
-/// clone can `.finish()`, dry-run, return `(gas_used, gas_used + 20%)`.
-/// Mirrors [`crate::PtbBuilder`]'s probe.
+/// Starting sim budget for the dry-run probe: 1 IOTA in nanos. The
+/// draft tx needs *a* budget for `.finish()` to succeed; the value
+/// itself only has to pass the chain's input checker (selected gas
+/// coin's balance ≥ budget).
+const SIM_BUDGET_START: u64 = 1_000_000_000;
+
+/// Floor for the adaptive halving — below ~8M nanos no publish fits
+/// anyway, so keep retrying past this point is pointless.
+const SIM_BUDGET_FLOOR: u64 = 8_000_000;
+
+/// Clone the in-progress builder, set a sim budget so the clone can
+/// `.finish()`, dry-run, return `(gas_used, gas_used + 20%)`.
+///
+/// The chain's input checker rejects the dry-run when the selected
+/// gas coin holds less than the sim budget — even with `skip_checks`.
+/// To stay usable on wallets below 1 IOTA (common after a few
+/// publishes in a workspace deploy), gas-related rejections trigger a
+/// retry with the budget halved, down to [`SIM_BUDGET_FLOOR`].
+///
+/// The returned budget is deliberately **not** capped at the sim
+/// value: if real usage exceeds it, an under-capped budget would send
+/// the publish on-chain doomed to `InsufficientGas` (burning real
+/// gas), while an honest `used + 20%` either succeeds or is rejected
+/// by the input checker pre-execution at zero cost.
 async fn dry_run_budget(
     tx: &TransactionBuilder,
     oracle: &(dyn GasOracle + '_),
+    log: &dyn Fn(&str),
 ) -> Result<(u64, u64), crate::OracleError> {
-    // 1 IOTA in nanos — generous; with `skip_checks` the network won't
-    // reject this regardless of the actual cost.
-    const SIM_BUDGET: u64 = 1_000_000_000;
-    let mut draft = tx.clone();
-    draft.gas_budget(SIM_BUDGET);
-    let built = draft
-        .finish()
-        .map_err(|e| crate::OracleError::Backend(format!("draft finish: {e}")))?;
-    let gas_used = oracle.dry_run_estimate(&built).await?;
-    let budget = gas_used.saturating_add(gas_used / 5).min(SIM_BUDGET);
-    Ok((gas_used, budget))
+    let mut sim = SIM_BUDGET_START;
+    loop {
+        let mut draft = tx.clone();
+        draft.gas_budget(sim);
+        let built = draft
+            .finish()
+            .map_err(|e| crate::OracleError::Backend(format!("draft finish: {e}")))?;
+        match oracle.dry_run_estimate(&built).await {
+            Ok(gas_used) => {
+                let budget = gas_used.saturating_add(gas_used / 5);
+                return Ok((gas_used, budget));
+            }
+            // Heuristic: the input checker's rejection reads
+            // "Transaction input checker should check that there is
+            // enough gas". Other gas-ish failures retry too — a few
+            // wasted round-trips at worst; anything else (network
+            // errors, real aborts) bails straight to the caller's
+            // fallback.
+            Err(e) if sim / 2 >= SIM_BUDGET_FLOOR && is_gas_related(&e) => {
+                log(&format!(
+                    "[deploy/gas] dry-run at sim budget {sim} rejected ({e}); retrying at {}",
+                    sim / 2,
+                ));
+                sim /= 2;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Does this oracle error look like a budget/balance rejection (as
+/// opposed to a network failure or a genuine execution abort)?
+fn is_gas_related(e: &crate::OracleError) -> bool {
+    let msg = e.to_string().to_ascii_lowercase();
+    msg.contains("gas") || msg.contains("balance")
 }
 
 /// Walk `effects.changed_objects` for the lone `PackageWrite` entry and
