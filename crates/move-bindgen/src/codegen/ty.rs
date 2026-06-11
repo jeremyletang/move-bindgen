@@ -107,9 +107,13 @@ fn rust_datatype(dt: &Datatype<Identifier>, ctx: &TypeCtx) -> Result<TokenStream
                 let arg = args.into_iter().next().unwrap_or_else(|| quote!(()));
                 return Ok(quote!(Option<#arg>));
             }
-            ("string", "String") | ("ascii", "String") => {
-                return Ok(quote!(String));
-            }
+            // `string::String` and `ascii::String` are wire-identical
+            // (both are `vector<u8>` BCS), but the chain checks
+            // struct identity at generic-instantiation positions. Map
+            // them to distinct Rust types so `MoveType::type_tag`
+            // produces the right tag for each.
+            ("string", "String") => return Ok(quote!(String)),
+            ("ascii", "String") => return Ok(quote!(AsciiString)),
             _ => {}
         }
     }

@@ -10,8 +10,8 @@
 use move_bindgen_ext_core::decl_pure_trait;
 
 use crate::{
-    framework::ID, Address, Argument, Input, MoveArg, ObjectId, ObjectReference, PTBArgument,
-    PtbBuilder, Receiving, Shared, SharedMut, U256,
+    framework::ID, Address, Argument, AsciiString, Input, MoveArg, ObjectId, ObjectReference,
+    PTBArgument, PtbBuilder, Receiving, Shared, SharedMut, U256,
 };
 
 decl_pure_trait!(PureBool, bool);
@@ -23,6 +23,51 @@ decl_pure_trait!(PureU128, u128);
 decl_pure_trait!(PureAddress, Address);
 decl_pure_trait!(PureString, String);
 decl_pure_trait!(PureID, ID);
+
+/// `0x1::ascii::String` marker. Hand-rolled (rather than via
+/// `decl_pure_trait!`) because `AsciiString` lives in
+/// `move-bindgen-ext-core` and `MoveArg` / `PTBArgument` live in the
+/// IOTA SDK — orphan rules forbid an `impl MoveArg for AsciiString` in
+/// this crate, so we bypass `apply_argument` and push a `Pure` input
+/// directly. Wire format is identical to Rust `String` (BCS-encoded
+/// `vector<u8>`); only the on-chain `TypeTag` differs.
+pub trait PureAsciiString {
+    #[allow(async_fn_in_trait)]
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized;
+    // Pure inputs have no on-chain mutability distinction; codegen
+    // still emits `_ref` / `_mut` for `&T` / `&mut T` params, so both
+    // default to `into_argument`.
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_ref(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
+    #[allow(async_fn_in_trait)]
+    async fn into_argument_mut(self, b: &mut PtbBuilder) -> Argument
+    where
+        Self: Sized,
+    {
+        self.into_argument(b).await
+    }
+}
+
+impl PureAsciiString for AsciiString {
+    async fn into_argument(self, b: &mut PtbBuilder) -> Argument {
+        b.inner.input(Input::Pure(
+            bcs::to_bytes(&self.0).expect("bcs serialization of AsciiString never fails"),
+        ))
+    }
+}
+
+impl PureAsciiString for Argument {
+    async fn into_argument(self, _b: &mut PtbBuilder) -> Argument {
+        self
+    }
+}
 
 /// Generic fallback trait used by codegen wherever it would otherwise
 /// emit a bare `impl PTBArgument` — i.e. for generic type parameters

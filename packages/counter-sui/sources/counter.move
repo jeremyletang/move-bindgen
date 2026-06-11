@@ -39,6 +39,13 @@ public struct Counter has key, store {
     id: UID,
     value: u64,
     target: u64,
+    /// Free-form utf8 label — exercises `0x1::string::String` in
+    /// pure-input and return positions.
+    label: std::string::String,
+    /// ASCII-only tag — exercises `0x1::ascii::String` in the same
+    /// positions, distinct from `label` so the bindings generator has
+    /// to keep the two stdlib string types apart.
+    tag: std::ascii::String,
 }
 
 /// Capability minted on creation; required for `reset`.
@@ -49,7 +56,13 @@ public struct AdminCap has key, store {
 
 /// Create a fresh shared counter. Returns the `AdminCap` to the sender.
 public fun create(target: u64, ctx: &mut TxContext): AdminCap {
-    let c = Counter { id: object::new(ctx), value: 0, target };
+    let c = Counter {
+        id: object::new(ctx),
+        value: 0,
+        target,
+        label: std::string::utf8(b""),
+        tag: std::ascii::string(b""),
+    };
     let cap = AdminCap { id: object::new(ctx), counter: object::id(&c) };
     transfer::share_object(c);
     cap
@@ -81,6 +94,31 @@ public fun set_note(c: &mut Counter, slot: u64, text: vector<u8>) {
 /// Read-only views — useful for dev-inspect codegen.
 public fun value(c: &Counter): u64 { c.value }
 public fun target(c: &Counter): u64 { c.target }
+
+/// Overwrite `c.label`. Exercises `0x1::string::String` as a pure
+/// parameter — the bindings generator accepts Rust `String` and BCS-
+/// serialises it.
+public fun set_label(c: &mut Counter, label: std::string::String) {
+    c.label = label;
+}
+
+/// Read `c.label`. Exercises `0x1::string::String` as a return type.
+public fun label(c: &Counter): std::string::String {
+    c.label
+}
+
+/// Overwrite `c.tag`. Exercises `0x1::ascii::String` as a pure
+/// parameter — distinct from `set_label` so codegen has to route this
+/// through `AsciiString` / `PureAsciiString`, not `String` /
+/// `PureString`.
+public fun set_tag(c: &mut Counter, tag: std::ascii::String) {
+    c.tag = tag;
+}
+
+/// Read `c.tag`. Exercises `0x1::ascii::String` as a return type.
+public fun tag(c: &Counter): std::ascii::String {
+    c.tag
+}
 
 /// Multi-return fixture — exercises codegen's tuple-return path.
 /// Returns `(value, target)` so callers can destructure both at once.
